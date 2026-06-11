@@ -80,6 +80,18 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .go:hover{transform:translateY(-2px);box-shadow:0 14px 30px var(--brand-orange-ring)}
 .go:disabled{opacity:.55;cursor:wait;transform:none;box-shadow:none}
 .free{color:var(--ink-3);font-size:13px;text-align:center;margin-top:12px}
+/* media drop-zone */
+.mediarow{margin-bottom:14px}
+.mediarow .opt{text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink-3)}
+.dropzone{border:1.5px dashed var(--border-strong);border-radius:var(--radius-md);background:var(--surface-sunken);padding:18px 16px;text-align:center;font-size:13.5px;color:var(--ink-3);cursor:pointer;transition:border-color .15s,background-color .15s}
+.dropzone:hover,.dropzone.drag{border-color:var(--brand-orange);background:var(--brand-orange-soft);color:var(--ink-2)}
+.dropzone .linklike{border:0;background:none;color:var(--brand-orange);font:600 13.5px var(--font-body);cursor:pointer;padding:0;text-decoration:underline}
+.mchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.mchip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink-2);border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-pill);padding:6px 12px;max-width:260px}
+.mchip .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mchip.up{border-color:var(--status-working,#FDAB3D)}
+.mchip.ok{border-color:var(--status-healthy,#00C875)}
+.mchip.bad{border-color:#E2445C;color:#B3261E}
 /* ---------- the show ---------- */
 #show{display:none;padding:34px 0 60px}
 .show-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:20px}
@@ -212,6 +224,14 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           <select id="style"><option value="default">Let the team pick</option><option value="warm">Warm</option><option value="fresh">Fresh</option><option value="modern">Modern</option><option value="trust">Trustworthy</option><option value="bold">Bold</option></select>
         </div>
       </div>
+      <div class="mediarow">
+        <label for="mfiles">Your photos &amp; videos <span class="opt">(optional — the team features them on your site)</span></label>
+        <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos">
+          <input id="mfiles" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden/>
+          Drop files here or <button type="button" class="linklike" id="mpick">browse</button> — up to 8 · photos ≤15MB · video ≤100MB
+        </div>
+        <div class="mchips" id="mchips"></div>
+      </div>
       <button class="go" id="go">Build my site — watch the team work</button>
       <p class="free">Free · no signup · about two minutes</p>
       <div id="restore" style="display:none;margin-top:14px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;font-size:13.5px;color:var(--ink-2)">💾 Your last build is saved on this device — <b id="restore-name"></b><button class="btn ghost" id="restore-go" style="padding:6px 14px;font-size:12.5px;margin-inline-start:10px">Bring it back</button></div>
@@ -302,6 +322,55 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   const lastByAgent = {};   // persona -> last meaningful action line (for the operate board)
   const feedByAgent = {};   // persona -> last 3 meaningful lines (operate-board activity feed)
   let seoScore = null;
+
+  // ---- optional media uploads: browser → signed URL → private GCS bucket ----
+  const MEDIA = [];     // { name, kind } — upload object names the build references
+  const MEDIA_MAX = 8;
+  let mediaCount = 0;   // accepted (in-flight + done) — keeps concurrent drops within the cap
+  function mediaChip(file) {
+    const el = document.createElement('span');
+    el.className = 'mchip up';
+    el.innerHTML = '<span class="nm"></span><span class="st">uploading…</span>';
+    el.querySelector('.nm').textContent = file.name.length > 26 ? file.name.slice(0, 24) + '…' : file.name;
+    $('mchips').appendChild(el);
+    return el;
+  }
+  async function uploadOne(file) {
+    const chip = mediaChip(file);
+    const st = chip.querySelector('.st');
+    try {
+      const sr = await fetch(API + '/api/uploads/sign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentType: file.type, size: file.size })
+      });
+      const sj = await sr.json().catch(() => ({}));
+      if (!sr.ok) throw new Error(sj.error || 'Upload rejected');
+      const pr = await fetch(sj.url, { method: 'PUT', headers: sj.headers, body: file });
+      if (!pr.ok) throw new Error('Upload failed (' + pr.status + ')');
+      MEDIA.push({ name: sj.name, kind: file.type.indexOf('video') === 0 ? 'video' : 'image' });
+      chip.className = 'mchip ok';
+      st.textContent = file.type.indexOf('video') === 0 ? '🎞 ready' : '📷 ready';
+    } catch (e) {
+      mediaCount--;
+      chip.className = 'mchip bad';
+      st.textContent = String(e.message || 'failed').slice(0, 60);
+      setTimeout(() => chip.remove(), 6000);
+    }
+  }
+  function takeFiles(list) {
+    for (const f of Array.from(list || [])) {
+      if (mediaCount >= MEDIA_MAX) break;
+      mediaCount++;
+      uploadOne(f);
+    }
+  }
+  $('mpick').addEventListener('click', (e) => { e.stopPropagation(); $('mfiles').click(); });
+  $('dz').addEventListener('click', () => $('mfiles').click());
+  $('dz').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('mfiles').click(); } });
+  $('mfiles').addEventListener('change', () => { takeFiles($('mfiles').files); $('mfiles').value = ''; });
+  $('dz').addEventListener('dragover', (e) => { e.preventDefault(); $('dz').classList.add('drag'); });
+  $('dz').addEventListener('dragleave', () => $('dz').classList.remove('drag'));
+  $('dz').addEventListener('drop', (e) => { e.preventDefault(); $('dz').classList.remove('drag'); takeFiles(e.dataTransfer.files); });
 
   $('chips').addEventListener('click', (e) => {
     const b = e.target.closest('.chip'); if (!b) return;
@@ -427,7 +496,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       category: $('category').value,
       description: $('description').value.trim(),
       lang: 'en',
-      style: $('style').value
+      style: $('style').value,
+      media: MEDIA.map(m => m.name)
     };
     if (!brief.business && !brief.description) { $('description').focus(); return; }
     $('go').disabled = true;
@@ -484,9 +554,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
             }
           }
           else if (ev.type === 'site') {
-            lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage, html: ev.html };
-            saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html);
-            document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
+            lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage, html: ev.html, userMedia: ev.userMedia || [] };
+            saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html);            document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
             ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
             $('show-title').textContent = 'Your site is ready';
             $('frame').srcdoc = ev.html;

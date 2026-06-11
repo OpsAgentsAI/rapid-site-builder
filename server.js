@@ -22,6 +22,7 @@ const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = req
 const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner } = require('./lib/store');
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
+const uploads = require('./lib/uploads');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -51,19 +52,24 @@ app.use('/api', (req, res, next) => {
 // /sites/* fine — those are quick GETs, not streams).
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-// ---- simple per-IP rate limit (builds are the expensive op) -------------------
-const RATE = new Map(); // ip -> [timestamps]
+// ---- simple per-IP rate limits ---------------------------------------------------
 const RATE_MAX = Number(process.env.BUILDS_PER_HOUR_PER_IP) || 12;
-function rateOk(req) {
-  const ip = (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim() || 'unknown';
-  const now = Date.now();
-  const arr = (RATE.get(ip) || []).filter(t => now - t < 3600_000);
-  if (arr.length >= RATE_MAX) return false;
-  arr.push(now);
-  RATE.set(ip, arr);
-  if (RATE.size > 5000) RATE.clear(); // crude memory guard
-  return true;
+const UPLOAD_RATE_MAX = Number(process.env.UPLOADS_PER_HOUR_PER_IP) || 30;
+function limiter(max) {
+  const hits = new Map(); // ip -> [timestamps]
+  return (req) => {
+    const ip = (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim() || 'unknown';
+    const now = Date.now();
+    const arr = (hits.get(ip) || []).filter(t => now - t < 3600_000);
+    if (arr.length >= max) return false;
+    arr.push(now);
+    hits.set(ip, arr);
+    if (hits.size > 5000) hits.clear(); // crude memory guard
+    return true;
+  };
 }
+const rateOk = limiter(RATE_MAX);         // builds are the expensive op
+const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
 
 // For English builds, drop Hebrew lines from streamed agent text — the deployed
 // crew's copy agent drafts bilingually by instruction; the English-only surface
@@ -128,6 +134,11 @@ function cleanBrief(body) {
     lang: body.lang === 'he' ? 'he' : 'en',
     style: normStyle(body.style)
   };
+  // upload names the intake collected — strictly server-shaped, capped, optional
+  const rawMedia = Array.isArray(body.media) ? body.media : [];
+  brief.media = rawMedia
+    .filter(n => typeof n === 'string' && uploads.NAME_RE.test(n))
+    .slice(0, uploads.MAX_FILES_PER_BUILD);
   if (!brief.business && !brief.description) return null;
   return brief;
 }
@@ -155,19 +166,47 @@ app.post('/api/build', async (req, res) => {
     ? inferCategory(brief.business + ' ' + brief.description)
     : brief.category;
   let heroPromise = heroImageUrl(imageCategory, brief.style).catch(() => null);
-  heroPromise.then(url => { if (url) send({ type: 'image', url }); });
 
   try {
     send({ type: 'start', brief: { business: brief.business, category: brief.category, lang: brief.lang } });
-    // Instant first draft — the deterministic spec renders in milliseconds and the
+// Instant first draft — the deterministic spec renders in milliseconds and the
     // crew then refines it live; a cache-hit hero (≤1.2s) rides along when ready.
     try {
       const draftHero = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 1200))]);
       const draftSpec = fallbackSpec(brief);
       send({ type: 'draft', spec: draftSpec, html: render(draftSpec, { heroImage: draftHero || null }) });
     } catch { /* draft is best-effort — never blocks the real build */ }
+
+    // The visitor's own photos/videos: verify + publish copies BEFORE the crew
+    // runs, so the first image can take over as the hero and the crew designs
+    // around real client media. Generated imagery stays the fallback. (Runs
+    // after the instant draft so the ≤3s draft promise holds even while
+    // uploads are being verified.)
+    let userMedia = [];
+    if (brief.media.length) {
+      userMedia = await uploads.prepareUserMedia(brief.media).catch(() => []);
+      if (userMedia.length) {
+        send({ type: 'media', items: userMedia });
+        send({
+          type: 'step', agent: 'layout_agent',
+          text: `The client sent ${userMedia.length} of their own ${userMedia.length === 1 ? 'file' : 'files'} — designing around real imagery instead of stock.`
+        });
+      }
+    }
+    const userHero = (userMedia.find(m => m.kind === 'image') || {}).url || null;
+    if (userHero) send({ type: 'image', url: userHero });
+    else heroPromise.then(url => { if (url) send({ type: 'image', url }); });
+
+    const crewBrief = {
+      business: brief.business, category: brief.category, description: brief.description,
+      lang: brief.lang, style: brief.style,
+      ...(userMedia.length ? {
+        user_photos: userMedia.filter(m => m.kind === 'image').length,
+        user_videos: userMedia.filter(m => m.kind === 'video').length
+      } : {})
+    };
     let lastPhase = -1;
-    const result = await engine.runBuild(brief, (step, phase) => {
+    const result = await engine.runBuild(crewBrief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
       const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
       // skip leftovers with no real content (e.g. a bare "---" divider after filtering)
@@ -178,9 +217,10 @@ app.post('/api/build', async (req, res) => {
       spec = fallbackSpec(brief);
       send({ type: 'step', agent: 'opsagents_builder_orchestrator', text: 'Pulling the final draft together from the team\'s notes — one more moment.' });
     }
-    const heroImage = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
-    const html = render(spec, { heroImage });
-    send({ type: 'site', spec, heroImage: heroImage || null, html });
+    const heroImage = userHero
+      || await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
+    const html = render(spec, { heroImage, userMedia });
+    send({ type: 'site', spec, heroImage: heroImage || null, userMedia, html });
   } catch (e) {
     // Reliability floor (charter): a build never ends in a bare error. The
     // spec-parse fallback above only covers a crew run that FINISHED without a
@@ -286,6 +326,23 @@ app.get('/api/my-sites', async (req, res) => {
   }
 });
 
+// ---- media uploads ----------------------------------------------------------------
+// The browser asks for a short-lived signed PUT URL, then sends the file
+// straight to the private uploads bucket — file bytes never pass through this
+// service at intake time. Type + size are bound into the signature and
+// re-verified from object metadata before anything is used in a build.
+app.post('/api/uploads/sign', async (req, res) => {
+  if (!uploads.ENABLED) return res.status(503).json({ error: 'Uploads are not enabled on this deployment.' });
+  if (!uploadRateOk(req)) return res.status(429).json({ error: 'Upload limit reached — try again in a bit.' });
+  try {
+    const body = req.body || {};
+    const signed = await uploads.signUpload(String(body.contentType || ''), Number(body.size));
+    res.json(signed);
+  } catch (e) {
+    res.status((e && e.status) || 500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
 // ---- publish --------------------------------------------------------------------
 app.post('/api/publish', async (req, res) => {
   try {
@@ -305,7 +362,10 @@ app.post('/api/publish', async (req, res) => {
     // into the site's meta and a devices/<id>/<site> marker so /api/my-sites
     // can find it again. Malformed ids are simply ignored — never an error.
     const deviceId = /^[a-f0-9]{32}$/.test(String(req.body.deviceId || '')) ? String(req.body.deviceId) : '';
-    const html = render(spec, { heroImage }); // always server-rendered — never client HTML
+    // media URLs are re-validated against our own public-bucket shape (card 0wdldq3z) —
+    // the published page never embeds an arbitrary client-supplied URL
+    const userMedia = uploads.sanitizeUserMedia(req.body.userMedia);
+    const html = render(spec, { heroImage, userMedia }); // always server-rendered — never client HTML
     // Stamp ownership two ways, both optional and independent: an owner record
     // (signed-in publish, card VI673sym) and a device marker (anonymous memory,
     // card jvsQp6cS). On the auth-off deploy `session` is always null; on the
@@ -406,6 +466,7 @@ app.get('/api/health', (_req, res) => res.json({
   imagesBucket: !!process.env.SITE_IMAGES_BUCKET,
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
   auth: auth.AUTH_ENABLED,
+  uploadsBucket: uploads.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
