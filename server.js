@@ -178,6 +178,7 @@ app.post('/api/warm-images', async (req, res) => {
 // ---- pages + health ---------------------------------------------------------------
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'web', 'index.html')));
 app.get(['/board', '/board/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'board', 'index.html')));
+app.get(['/campfire', '/campfire/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'campfire', 'index.html')));
 app.get('/api/health', (_req, res) => res.json({
   ok: true,
   agentEngine: engine.ENABLED,
