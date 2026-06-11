@@ -101,16 +101,25 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .pill.d{background:var(--status-healthy-soft);color:var(--status-healthy-ink)}
 .agent.working{box-shadow:0 0 0 2px var(--status-working),var(--shadow-lift);transform:translateX(4px)}
 .agent.done .bar{background:var(--status-healthy)}
-/* console + preview column */
+/* conversation feed + preview column */
 .main-col{display:flex;flex-direction:column;gap:18px;min-width:0}
 .console{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-card)}
 .console .bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--border);background:var(--surface-sunken);font-size:12.5px;color:var(--ink-3);font-weight:600;font-family:var(--font-display)}
 .console .bar .lights{display:flex;gap:6px}
 .console .bar .lights i{width:10px;height:10px;border-radius:50%;display:block}
-.console .body{height:300px;overflow-y:auto;padding:14px 16px;font-family:var(--font-mono);font-size:12.5px;line-height:1.75;color:var(--ink-2);background:var(--surface)}
-.cline{margin-bottom:7px;word-break:break-word;animation:fadein .25s ease}
-@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
-.cline .who{font-weight:600;border-radius:6px;padding:1px 7px;margin-inline-end:8px;font-size:11px}
+.console .body{height:340px;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:11px;background:var(--canvas-tint)}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+.bub{display:flex;gap:10px;align-items:flex-start;animation:fadein .3s var(--ease-out) both;max-width:92%}
+.bub .bav{width:34px;height:34px;flex:0 0 34px;border-radius:11px;overflow:hidden;background:color-mix(in srgb,var(--hue) 14%,white);box-shadow:inset 0 0 0 2px var(--hue)}
+.bub .bav img{width:100%;height:100%;display:block}
+.bub .msg{background:var(--surface);border:1px solid var(--border);border-radius:4px 14px 14px 14px;padding:9px 13px;font-size:13.5px;line-height:1.55;color:var(--ink-2);min-width:0;box-shadow:var(--shadow-sm)}
+.bub .who{font-size:10.5px;font-weight:700;letter-spacing:.05em;color:var(--hue);margin-bottom:2px;text-transform:uppercase;font-family:var(--font-display)}
+.bub .tool{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ink-3);background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:4px 11px}
+.bub .tool i{width:6px;height:6px;border-radius:50%;background:var(--hue);animation:pulse 1.2s infinite}
+.bub details{margin-top:6px}
+.bub summary{font-size:11.5px;color:var(--ink-3);cursor:pointer;font-weight:600}
+.bub pre{margin-top:6px;font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--ink-3);white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;background:var(--surface-sunken);border-radius:var(--radius-sm);padding:8px 10px}
+.sysline{align-self:center;font-size:11.5px;font-weight:600;color:var(--ink-3);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);padding:5px 14px;animation:fadein .3s ease both}
 .arize-banner{display:none;align-items:center;gap:12px;background:color-mix(in srgb,var(--agent-purple) 9%,white);border:1px solid color-mix(in srgb,var(--agent-purple) 38%,transparent);border-inline-start:5px solid var(--agent-purple);border-radius:var(--radius-lg);padding:13px 17px;font-size:14px;color:var(--ink-2);box-shadow:var(--shadow-sm)}
 .arize-banner b{color:var(--agent-purple)}
 .arize-banner .mini{width:34px;height:34px;flex:0 0 34px;border-radius:11px;background:color-mix(in srgb,var(--agent-purple) 14%,white);box-shadow:inset 0 0 0 2px var(--agent-purple);overflow:hidden}
@@ -204,8 +213,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       <div class="main-col">
         <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
         <div class="console">
-          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> live agent feed · Vertex AI Agent Engine</div>
-          <div class="body" id="feed"></div>
+          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> the team, live · Vertex AI Agent Engine</div>
+          <div class="body" id="feed" aria-live="polite"></div>
         </div>
         <div class="err" id="err"></div>
         <div class="preview" id="preview">
@@ -292,6 +301,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     if (state === 'd') { el.classList.add('done'); pill.className = 'pill d'; pill.textContent = 'done'; }
     if (lastText) el.querySelector('.last').textContent = lastText.slice(0, 90);
   }
+  const personaOf = (key) => PERSONAS.find(p => p.id === key);
+  function pushBubble(node) {
+    const body = $('feed');
+    body.appendChild(node);
+    if (++feedCount > 200) body.removeChild(body.firstChild);
+    body.scrollTop = body.scrollHeight;
+  }
   function feed(author, text) {
     const key = personaFor(author);
     if (key !== 'orchestrator') {
@@ -304,20 +320,67 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       }
     }
     const seoM = text.match(/score[^0-9]{0,12}(\d{1,3})/i);
-    if (seoM && personaFor(author) === 'sam') seoScore = Math.min(100, Number(seoM[1]));
-    const div = document.createElement('div');
-    div.className = 'cline';
-    const who = document.createElement('span');
+    if (seoM && key === 'sam') seoScore = Math.min(100, Number(seoM[1]));
+
+    const p = personaOf(key) || personaOf('theo');
+
+    // handoffs become quiet system lines, like "Theo brings in Leo"
+    const hand = text.match(/^→ handing off to (.+)$/);
+    if (hand) {
+      const target = personaOf(personaFor(hand[1]));
+      const line = document.createElement('div');
+      line.className = 'sysline';
+      line.textContent = `${p.name} brings in ${target ? target.name : hand[1]}`;
+      pushBubble(line);
+      return;
+    }
+
+    const bub = document.createElement('div');
+    bub.className = 'bub';
+    bub.style.setProperty('--hue', p.hue);
+    const msg = document.createElement('div');
+    msg.className = 'msg';
+    const who = document.createElement('div');
     who.className = 'who';
-    who.style.background = (COLORS[key] || '#A4A9C0') + '33';
-    who.style.color = COLORS[key] || '#A4A9C0';
-    who.textContent = key === 'orchestrator' ? (author || 'team') : key;
-    div.appendChild(who);
-    div.appendChild(document.createTextNode(text.length > 700 ? text.slice(0, 700) + ' …' : text));
-    const body = $('feed');
-    body.appendChild(div);
-    if (++feedCount > 400) body.removeChild(body.firstChild);
-    body.scrollTop = body.scrollHeight;
+    who.textContent = p.name;
+    msg.appendChild(who);
+
+    const tool = text.match(/^🔧 ([\w.-]+)\(([\s\S]*)\)\s*$/);
+    const jsonish = /^[{[]/.test(text.trim());
+    if (tool) {
+      // tool calls become a soft "working" chip; args fold away
+      const chip = document.createElement('span');
+      chip.className = 'tool';
+      chip.innerHTML = `<i></i>working: ${tool[1].replace(/_/g, ' ')}`;
+      msg.appendChild(chip);
+      if (tool[2] && tool[2].trim().length > 3) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>details</summary>`;
+        const pre = document.createElement('pre');
+        pre.textContent = tool[2].slice(0, 500);
+        det.appendChild(pre);
+        msg.appendChild(det);
+      }
+    } else if (jsonish) {
+      // structured results fold behind a tap — proof without the wall of JSON
+      const det = document.createElement('details');
+      det.innerHTML = `<summary>shared structured results</summary>`;
+      const pre = document.createElement('pre');
+      pre.textContent = text.slice(0, 700);
+      det.appendChild(pre);
+      msg.appendChild(det);
+    } else {
+      const para = document.createElement('div');
+      para.textContent = text.length > 500 ? text.slice(0, 500) + ' …' : text;
+      msg.appendChild(para);
+    }
+
+    const av = document.createElement('span');
+    av.className = 'bav';
+    av.innerHTML = `<img alt="" src="${face(p.seed)}"/>`;
+    bub.appendChild(av);
+    bub.appendChild(msg);
+    pushBubble(bub);
     if (key === 'phoenix' && /arize|dataset|phoenix/i.test(text)) $('arize').style.display = 'flex';
   }
   function phase(n) {
@@ -371,7 +434,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
           if (ev.type === 'phase') phase(ev.n);
           else if (ev.type === 'step') feed(ev.agent, ev.text);
-          else if (ev.type === 'image') { heroImage = ev.url; feed('nano-banana', 'hero image ready (cached Gemini art): ' + ev.url.split('/').slice(-3).join('/')); }
+          else if (ev.type === 'image') { heroImage = ev.url; feed('layout_agent', 'Hero photography is in — picked from our Gemini image studio.'); }
           else if (ev.type === 'site') {
             lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
             document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
