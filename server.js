@@ -25,6 +25,12 @@ const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
 
 const app = express();
+// Exactly one trusted hop (Cloud Run's front end, which appends the real
+// client IP as the LAST X-Forwarded-For entry) — req.ip then resolves to that
+// entry instead of the client-controlled leftmost one. Without this, rotating
+// XFF per request mints unlimited rate-limit identities (PR #3 security
+// review, finding 1).
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'web'), { index: false }));
 
@@ -58,7 +64,9 @@ const UPLOAD_RATE_MAX = Number(process.env.UPLOADS_PER_HOUR_PER_IP) || 30;
 function limiter(max) {
   const hits = new Map(); // ip -> [timestamps]
   return (req) => {
-    const ip = (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim() || 'unknown';
+    // req.ip honors trust-proxy(1): the GFE-appended XFF entry, not the
+    // spoofable leftmost hop. Never parse X-Forwarded-For by hand here.
+    const ip = String(req.ip || '').trim() || 'unknown';
     const now = Date.now();
     const arr = (hits.get(ip) || []).filter(t => now - t < 3600_000);
     if (arr.length >= max) return false;

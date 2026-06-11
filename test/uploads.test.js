@@ -98,10 +98,25 @@ test('stripJpegMetadata leaves non-JPEG buffers untouched', () => {
   assert.strictEqual(uploads.stripJpegMetadata(tiny), tiny);
 });
 
-test('stripJpegMetadata keeps malformed segment tails as-is instead of corrupting', () => {
+test('stripJpegMetadata REJECTS malformed segment layouts instead of shipping the un-stripped tail', () => {
   const soi = Buffer.from([0xFF, 0xD8]);
-  // declared length runs past the end of the buffer
-  const broken = Buffer.concat([soi, Buffer.from([0xFF, 0xE1, 0xFF, 0xFF, 0x01, 0x02])]);
-  const out = uploads.stripJpegMetadata(broken);
-  assert.deepStrictEqual(out, broken);
+  // declared length runs past the end of the buffer — un-walked bytes could
+  // carry EXIF/GPS, so the file must be rejected (security review finding 3)
+  const overrun = Buffer.concat([soi, Buffer.from([0xFF, 0xE1, 0xFF, 0xFF, 0x01, 0x02])]);
+  assert.throws(() => uploads.stripJpegMetadata(overrun), /rejected/);
+  // stray fill byte between segments breaks the marker walk before SOS
+  const strayFill = Buffer.concat([soi, Buffer.from([0xFF, 0xDB, 0x00, 0x02]), Buffer.from([0x00, 0xFF, 0xDA, 0x00, 0x02])]);
+  assert.throws(() => uploads.stripJpegMetadata(strayFill), /rejected/);
+  // truncated before reaching start-of-scan
+  const truncated = Buffer.concat([soi, Buffer.from([0xFF, 0xDB, 0x00, 0x04, 0x01, 0x02])]);
+  assert.throws(() => uploads.stripJpegMetadata(truncated), /rejected/);
+});
+
+test('lengthRangeFor binds the signature to the declared size, capped at the type ceiling', () => {
+  const SLACK = 16 * 1024;
+  assert.strictEqual(uploads.lengthRangeFor('image/jpeg', 1000), `0,${1000 + SLACK}`);
+  assert.strictEqual(uploads.lengthRangeFor('video/mp4', 5_000_000), `0,${5_000_000 + SLACK}`);
+  // a declaration at (or near) the cap never exceeds the cap
+  assert.strictEqual(uploads.lengthRangeFor('image/jpeg', 15 * 1024 * 1024), `0,${15 * 1024 * 1024}`);
+  assert.strictEqual(uploads.lengthRangeFor('video/mp4', 10 ** 12), `0,${100 * 1024 * 1024}`);
 });
