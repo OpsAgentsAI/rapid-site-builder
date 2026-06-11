@@ -54,6 +54,8 @@
     }
   };
 
+  // Roster data follows the design system's assets/agents.js shape:
+  // metric {value,label} renders the hue-tinted chip, feed[] the ▸ activity lines.
   const ROSTER = [
     { id: 'aria', name: 'Aria', nameHe: 'אריה', emoji: '🔍', color: 'violet', role: 'Research', roleHe: 'מחקר', crew: 'build' },
     { id: 'leo', name: 'Leo', nameHe: 'ליאו', emoji: '🎨', color: 'blue', role: 'Layout', roleHe: 'פריסה', crew: 'build' },
@@ -61,18 +63,28 @@
     { id: 'sam', name: 'Sam', nameHe: 'סם', emoji: '📈', color: 'green', role: 'SEO', roleHe: 'קידום', crew: 'build' },
     { id: 'max', name: 'Max', nameHe: 'מקס', emoji: '🚀', color: 'orange', role: 'Publish', roleHe: 'פרסום', crew: 'build' },
     { id: 'phoenix', name: 'Phoenix', nameHe: 'פיניקס', emoji: '🔭', color: 'purple', role: 'Arize · tracing', roleHe: 'אריז · מעקב', crew: 'observe' },
-    { id: 'vera', name: 'Vera', nameHe: 'ורה', emoji: '🩺', color: 'green', role: 'Monitor', roleHe: 'ניטור', crew: 'operate',
-      sample: { en: 'Uptime watch armed for your site', he: 'ניטור זמינות דרוך לאתר שלך' }, status: 'healthy' },
-    { id: 'ben', name: 'Ben', nameHe: 'בן', emoji: '💾', color: 'teal', role: 'Backup', roleHe: 'גיבוי', crew: 'operate',
-      sample: { en: 'Daily backup scheduled', he: 'גיבוי יומי מתוזמן' }, status: 'idle' },
-    { id: 'uri', name: 'Uri', nameHe: 'אורי', emoji: '⬆️', color: 'amber', role: 'Updates', roleHe: 'עדכונים', crew: 'operate',
-      sample: { en: 'Core update proposed · awaiting your call', he: 'עדכון ליבה מוצע · ממתין להחלטתך' }, status: 'working' },
-    { id: 'gil', name: 'Gil', nameHe: 'גיל', emoji: '🛡️', color: 'coral', role: 'Security', roleHe: 'אבטחה', crew: 'operate',
-      sample: { en: 'Threat watch on · 0 open findings', he: 'ניטור איומים פעיל · 0 ממצאים פתוחים' }, status: 'healthy' },
-    { id: 'tova', name: 'Tova', nameHe: 'טובה', emoji: '📝', color: 'sky', role: 'Content · SEO', roleHe: 'תוכן · קידום', crew: 'operate',
-      sample: { en: 'Content freshness watch armed', he: 'ניטור רעננות תוכן דרוך' }, status: 'idle' },
-    { id: 'cara', name: 'Cara', nameHe: 'קארה', emoji: '🔐', color: 'lime', role: 'Certificates', roleHe: 'אישורים', crew: 'operate',
-      sample: { en: 'TLS auto-renew armed', he: 'חידוש TLS אוטומטי דרוך' }, status: 'healthy' }
+    { id: 'vera', name: 'Vera', nameHe: 'ורה', emoji: '🩺', color: 'green', role: 'Monitor', roleHe: 'ניטור', crew: 'operate', status: 'healthy',
+      sample: { en: 'Uptime watch armed for your site', he: 'ניטור זמינות דרוך לאתר שלך' },
+      metric: { value: '24/7', label: { en: 'uptime watch', he: 'ניטור זמינות' } },
+      feed: { en: ['probe_site_health → armed', 'TLS check scheduled'], he: ['probe_site_health → דרוך', 'בדיקת TLS מתוזמנת'] } },
+    { id: 'ben', name: 'Ben', nameHe: 'בן', emoji: '💾', color: 'teal', role: 'Backup', roleHe: 'גיבוי', crew: 'operate', status: 'idle',
+      sample: { en: 'Daily backup scheduled', he: 'גיבוי יומי מתוזמן' },
+      feed: { en: ['snapshot plan: daily 03:00', 'restore drill scheduled'], he: ['תוכנית גיבוי: יומי 03:00', 'תרגיל שחזור מתוזמן'] } },
+    { id: 'uri', name: 'Uri', nameHe: 'אורי', emoji: '⬆️', color: 'amber', role: 'Updates', roleHe: 'עדכונים', crew: 'operate', status: 'working', needsApproval: true,
+      sample: { en: 'Core update proposed · awaiting your call', he: 'עדכון ליבה מוצע · ממתין להחלטתך' },
+      metric: { value: '1', label: { en: 'proposal waiting', he: 'הצעה ממתינה' } },
+      feed: { en: ['check_updates → 1 behind', 'filed proposal card', 'parked — no change without you'], he: ['check_updates → עדכון אחד', 'נפתח כרטיס הצעה', 'ממתין — אין שינוי בלעדיך'] } },
+    { id: 'gil', name: 'Gil', nameHe: 'גיל', emoji: '🛡️', color: 'coral', role: 'Security', roleHe: 'אבטחה', crew: 'operate', status: 'healthy',
+      sample: { en: 'Threat watch on · 0 open findings', he: 'ניטור איומים פעיל · 0 ממצאים פתוחים' },
+      metric: { value: '0', label: { en: 'open findings', he: 'ממצאים פתוחים' } },
+      feed: { en: ['scan → clean', 'rate-limit shield armed'], he: ['סריקה → נקי', 'מגן הגבלת-קצב דרוך'] } },
+    { id: 'tova', name: 'Tova', nameHe: 'טובה', emoji: '📝', color: 'sky', role: 'Content · SEO', roleHe: 'תוכן · קידום', crew: 'operate', status: 'idle',
+      sample: { en: 'Content freshness watch armed', he: 'ניטור רעננות תוכן דרוך' },
+      feed: { en: ['freshness scan scheduled', 'internal-link audit queued'], he: ['סריקת רעננות מתוזמנת', 'בדיקת קישורים בתור'] } },
+    { id: 'cara', name: 'Cara', nameHe: 'קארה', emoji: '🔐', color: 'lime', role: 'Certificates', roleHe: 'אישורים', crew: 'operate', status: 'healthy',
+      sample: { en: 'TLS auto-renew armed', he: 'חידוש TLS אוטומטי דרוך' },
+      metric: { value: '✓', label: { en: 'auto-renew armed', he: 'חידוש אוטומטי דרוך' } },
+      feed: { en: ['TLS chain verified', 'auto-renew armed'], he: ['שרשרת TLS אומתה', 'חידוש אוטומטי דרוך'] } }
   ];
 
   let lang = (state && state.lang) === 'he' ? 'he' : 'en';
@@ -125,41 +137,70 @@
     };
   }
 
+  const resolved = {}; // agent id -> 'approved' | 'rejected' (in-card gates, local demo state)
+
   function renderTeam() {
     const ran = new Set(state ? state.agentsRan || [] : []);
     const lastBy = (state && state.lastByAgent) || {};
+    const feedBy = (state && state.feedByAgent) || {};
     // map landing personas → roster ids (brief → aria)
-    if (ran.has('brief')) { ran.add('aria'); if (lastBy.brief) lastBy.aria = lastBy.brief; }
+    if (ran.has('brief')) {
+      ran.add('aria');
+      if (lastBy.brief) lastBy.aria = lastBy.brief;
+      if (feedBy.brief) feedBy.aria = feedBy.brief;
+    }
+    const statusLabel = {
+      en: { healthy: 'Healthy', working: 'Working', stuck: 'Needs approval', idle: 'Idle' },
+      he: { healthy: 'תקין', working: 'עובד', stuck: 'דרוש אישור', idle: 'ממתין' }
+    }[lang];
+    const arrow = lang === 'he' ? '◂' : '▸';
+
     const cards = ROSTER.map(a => {
       const isLive = ran.has(a.id);
       const name = lang === 'he' ? a.nameHe : a.name;
       const role = lang === 'he' ? a.roleHe : a.role;
-      let status, last, tag;
+      const res = resolved[a.id];
+      let status, last, tag, feed, metric, needsApproval;
+
       if (isLive) {
-        status = a.id === 'max' && state && state.url ? 'healthy' : 'healthy';
+        status = 'healthy';
         last = lastBy[a.id] || (lang === 'he' ? 'פעל בבנייה האחרונה שלך' : 'Acted in your last build');
         tag = `<span class="live-tag"><i></i>LIVE</span>`;
+        feed = feedBy[a.id] || [];
+        if (a.id === 'sam' && state && state.seoScore) metric = { value: String(state.seoScore), label: lang === 'he' ? 'ציון SEO לאתר שלך' : 'SEO score · your site' };
+        if (a.id === 'max' && state && state.url) metric = { value: '✓', label: lang === 'he' ? 'באוויר' : 'shipped & live' };
+        if (a.id === 'phoenix') metric = { value: '✓', label: lang === 'he' ? 'הריצה תועדה ב-Arize' : 'run traced · Arize' };
       } else {
-        status = a.status || 'idle';
-        last = a.sample ? a.sample[lang] : t('handled');
+        status = res === 'approved' ? 'healthy' : res === 'rejected' ? 'idle' : (a.status || 'idle');
+        last = res === 'approved' ? (lang === 'he' ? 'אושר — מטופל' : 'Approved — on it')
+             : res === 'rejected' ? (lang === 'he' ? 'נדחה — נשאר כמו שזה' : 'Rejected — staying as is')
+             : (a.sample ? a.sample[lang] : t('handled'));
         tag = '';
+        feed = (a.feed && a.feed[lang]) || [];
+        if (a.metric && !res) metric = { value: a.metric.value, label: a.metric.label[lang] };
+        needsApproval = a.needsApproval && !res;
       }
-      const statusLabel = {
-        en: { healthy: 'Healthy', working: 'Working', stuck: 'Needs approval', idle: 'Idle' },
-        he: { healthy: 'תקין', working: 'עובד', stuck: 'דרוש אישור', idle: 'ממתין' }
-      }[lang][status];
+
       return `<article class="card" style="--hue:var(--agent-${a.color})">
         <span class="bar" aria-hidden="true"></span>
         <header>
-          <span class="av" aria-hidden="true">${a.emoji}</span>
+          <span class="av${status === 'working' ? ' bob' : ''}" aria-hidden="true">${a.emoji}</span>
           <div class="meta"><div class="nm">${esc(name)} ${tag}</div><div class="rl">${esc(role)}</div></div>
-          <span class="pill ${status}">${statusLabel}</span>
+          <span class="pill ${status}">${statusLabel[status]}</span>
         </header>
         <p class="last">${esc(last)}</p>
-        ${isLive ? '' : `<span class="sample">${t('sample')}</span>`}
+        ${metric ? `<div class="metric"><b>${esc(metric.value)}</b><span>${esc(metric.label)}</span></div>` : ''}
+        ${feed.length ? `<ul class="cfeed">${feed.slice(0, 3).map(l => `<li><i>${arrow}</i><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
+        ${needsApproval ? `<div class="gate"><span class="g-label">✋ ${lang === 'he' ? 'שער אישור אנושי' : 'Human approval'}</span><button class="rej" data-act="reject" data-id="${a.id}">${lang === 'he' ? 'דחייה' : 'Reject'}</button><button class="app" data-act="approve" data-id="${a.id}">${lang === 'he' ? 'אישור' : 'Approve'}</button></div>` : ''}
+        ${isLive || res ? '' : `<span class="sample">${t('sample')}</span>`}
       </article>`;
     });
     $('grid').innerHTML = cards.join('');
+    $('grid').querySelectorAll('.gate button').forEach(b => b.addEventListener('click', () => {
+      resolved[b.dataset.id] = b.dataset.act === 'approve' ? 'approved' : 'rejected';
+      if (b.dataset.act === 'approve') { const needs = $('needs'); if (needs) needs.style.display = 'none'; }
+      renderTeam();
+    }));
   }
 
   async function ask() {

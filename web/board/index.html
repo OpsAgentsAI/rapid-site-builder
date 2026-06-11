@@ -103,6 +103,21 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .pill.idle{background:var(--status-idle-soft);color:var(--status-idle-ink)}
 .last{font-size:13px;color:var(--ink-2);line-height:1.4}
 .sample{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;font-weight:700;opacity:.7}
+.av.bob{animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-3px)}}
+.metric{display:flex;align-items:baseline;gap:8px;padding:9px 12px;background:color-mix(in srgb,var(--hue) 8%,white);border-radius:var(--radius-md)}
+.metric b{font:800 20px/1 var(--font-display);color:var(--hue);letter-spacing:-.02em}
+.metric span{font-size:12.5px;color:var(--ink-3)}
+.cfeed{list-style:none;display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--border-faint);padding-top:10px;margin:0;padding-inline:0}
+.cfeed li{display:flex;align-items:flex-start;gap:7px;font-family:var(--font-mono);font-size:12.5px;color:var(--ink-3);line-height:1.4}
+.cfeed li:first-child{color:var(--ink-2)}
+.cfeed li i{color:var(--hue);font-style:normal;flex:none;margin-top:1px}
+.cfeed li span{min-width:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.gate{display:flex;align-items:center;gap:8px;padding-top:11px;border-top:1px solid var(--border-faint)}
+.gate .g-label{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--status-stuck-ink);margin-inline-end:auto}
+.gate button{min-height:36px;padding:0 14px;font:600 13.5px var(--font-body);border-radius:var(--radius-sm);cursor:pointer}
+.gate .rej{color:var(--ink-2);background:var(--surface-sunken);border:1px solid var(--border)}
+.gate .app{color:#fff;background:var(--brand-gradient);border:0;font-weight:700}
 .foot{margin-top:36px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
 .back{display:inline-flex;align-items:center;gap:8px;margin-top:8px;color:var(--brand-orange);font-weight:700;font-size:14px;text-decoration:none}
 .back:hover{text-decoration:underline}

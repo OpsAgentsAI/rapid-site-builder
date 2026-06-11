@@ -229,6 +229,7 @@ footer b{color:var(--ink)}
   const COLORS = { brief:'#3B82F6', leo:'#EC4899', noa:'#F59E0B', sam:'#22C55E', phoenix:'#7C5CFF', max:'#2DD4BF', orchestrator:'#8B97B8' };
   let lastBuild = null, agentsRan = new Set(), feedCount = 0;
   const lastByAgent = {};   // persona -> last meaningful action line (for the operate board)
+  const feedByAgent = {};   // persona -> last 3 meaningful lines (operate-board activity feed)
   let seoScore = null;
 
   $('chips').addEventListener('click', (e) => {
@@ -257,7 +258,12 @@ footer b{color:var(--ink)}
     const key = personaFor(author);
     if (key !== 'orchestrator') {
       agentsRan.add(key); setPill(key, 'w', text);
-      if (!/^→|^🔧/.test(text)) lastByAgent[key] = text.slice(0, 160);
+      if (!/^→/.test(text)) {
+        const line = text.slice(0, 110);
+        (feedByAgent[key] = feedByAgent[key] || []).push(line);
+        if (feedByAgent[key].length > 3) feedByAgent[key].shift();
+        if (!/^🔧/.test(text)) lastByAgent[key] = text.slice(0, 160);
+      }
     }
     const seoM = text.match(/score[^0-9]{0,12}(\d{1,3})/i);
     if (seoM && personaFor(author) === 'sam') seoScore = Math.min(100, Number(seoM[1]));
@@ -371,12 +377,13 @@ footer b{color:var(--ink)}
       $('live').style.display = 'flex';
       $('publish').style.display = 'none';
       lastByAgent.max = 'Shipped the site live: ' + j.url;
+      feedByAgent.max = ['render(spec) → single-file HTML', 'saved to site store', 'live at ' + j.url.replace(/^https?:\/\//, '')];
       sessionStorage.setItem('operate_state', JSON.stringify({
         business: lastBuild.spec.business,
         lang: lastBuild.spec.lang === 'he' ? 'he' : 'en',
         url: j.url, id: j.id,
         agentsRan: [...agentsRan],
-        lastByAgent, seoScore,
+        lastByAgent, feedByAgent, seoScore,
         at: Date.now()
       }));
     } catch (e) {
