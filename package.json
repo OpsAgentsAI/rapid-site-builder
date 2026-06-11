@@ -7,7 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "seed-images": "node scripts/seed_images.mjs"
   },
   "dependencies": {
