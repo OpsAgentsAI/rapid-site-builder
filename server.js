@@ -176,7 +176,24 @@ app.post('/api/build', async (req, res) => {
     const html = render(spec, { heroImage });
     send({ type: 'site', spec, heroImage: heroImage || null, html });
   } catch (e) {
-    send({ type: 'error', message: String((e && e.message) || e).slice(0, 400) });
+    // Reliability floor (charter): a build never ends in a bare error. The
+    // spec-parse fallback above only covers a crew run that FINISHED without a
+    // usable spec — this path covers total engine failure (throw mid-run,
+    // engine outage, zero events). Same deterministic category-aware draft,
+    // flagged with an honest system line. Witnessed live 2026-06-11 17:31 UTC:
+    // start → image → error → done left the user at a dead end (card aAp5r5af).
+    console.warn('[build] engine failed, serving deterministic fallback:', String((e && e.message) || e).slice(0, 300));
+    try {
+      send({ type: 'step', agent: 'opsagents_builder_orchestrator', text: 'The engine hit turbulence mid-run — assembling your draft from the team\'s playbook instead.' });
+      const spec = fallbackSpec(brief);
+      const heroImage = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 8000))]);
+      const html = render(spec, { heroImage });
+      send({ type: 'site', spec, heroImage: heroImage || null, html });
+    } catch (e2) {
+      // render of the deterministic spec failing is a code bug, not a flake —
+      // only here may the stream end in an error event.
+      send({ type: 'error', message: String((e2 && e2.message) || e2).slice(0, 400) });
+    }
   } finally {
     clearInterval(ping);
     send({ type: 'done' });
