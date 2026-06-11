@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PROJECT_ID: opsagent-staging
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
   SERVICE: rapid-builder-proxy
   HOSTING_SITE: rapid-site-builder
@@ -40,10 +40,10 @@ jobs:
             --source . \
             --project "$PROJECT_ID" \
             --region "$REGION" \
-            --service-account "rapid-builder-proxy@opsagent-staging.iam.gserviceaccount.com" \
+            --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 512Mi --cpu 1 --timeout 600 --max-instances 5 \
-            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=opsagent-staging-site-images,PUBLISHED_SITES_BUCKET=opsagent-staging-published-sites,IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=us-central1,WARM_KEY=${{ secrets.WARM_KEY }}" \
+            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=us-central1,WARM_KEY=${{ secrets.WARM_KEY }}" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
           gcloud run services update-traffic "$SERVICE" --to-latest \
