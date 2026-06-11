@@ -79,8 +79,12 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .phase.done{color:var(--ink-2)}
 .phase.done .dot{background:var(--status-healthy)}
 @keyframes pulse{50%{opacity:.35}}
-.stage{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}
-@media(max-width:960px){.stage{grid-template-columns:1fr}}
+.stage{display:grid;grid-template-columns:250px minmax(0,1fr) 370px;grid-template-areas:"crew main chat";gap:20px;align-items:start}
+.stage>.crew{grid-area:crew}
+.stage>.main-col{grid-area:main}
+.side-col{grid-area:chat;display:flex;flex-direction:column;gap:18px;min-width:0}
+@media(max-width:1180px){.stage{grid-template-columns:minmax(0,1fr) 350px;grid-template-areas:"crew crew" "main chat"}.stage>.crew{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:10px}}
+@media(max-width:960px){.stage{grid-template-columns:1fr;grid-template-areas:"main" "chat" "crew"}.stage>.crew{display:flex;flex-direction:column}}
 /* crew cards — design-system AgentCard */
 .crew{display:flex;flex-direction:column;gap:12px}
 .agent{position:relative;display:flex;gap:13px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;padding-inline-start:18px;transition:all .25s var(--ease-out);box-shadow:var(--shadow-card);overflow:hidden}
@@ -131,6 +135,9 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .preview .pbar .lights i{width:11px;height:11px;border-radius:50%;display:block}
 .preview .url{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);font-family:var(--font-mono);font-size:12px;color:var(--ink-3);padding:7px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .preview iframe{width:100%;height:640px;border:0;background:#fff}
+.pstate{display:none;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:var(--radius-pill);white-space:nowrap;flex:0 0 auto}
+.pstate.draft{display:inline-block;background:var(--status-working-soft);color:var(--status-working-ink);animation:pulse 1.2s infinite}
+.pstate.done{display:inline-block;background:var(--status-healthy-soft);color:var(--status-healthy-ink)}
 .actions{display:none;gap:12px;flex-wrap:wrap;align-items:center}
 .btn{display:inline-flex;align-items:center;gap:9px;border:0;border-radius:var(--radius-md);padding:14px 26px;font:700 15px var(--font-display);cursor:pointer;transition:transform .15s,box-shadow .15s}
 .btn.primary{background:var(--brand-gradient);color:#fff;box-shadow:var(--shadow-sm)}
@@ -211,16 +218,11 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     <div class="stage">
       <div class="crew" id="crew"></div>
       <div class="main-col">
-        <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
-        <div class="console">
-          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> the team, live · Vertex AI Agent Engine</div>
-          <div class="body" id="feed" aria-live="polite"></div>
-        </div>
-        <div class="err" id="err"></div>
         <div class="preview" id="preview">
-          <div class="pbar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span><span class="url" id="purl">preview — built by your agent team</span></div>
+          <div class="pbar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span><span class="url" id="purl">preview — built by your agent team</span><span class="pstate" id="pstate"></span></div>
           <iframe id="frame" sandbox title="Generated website preview"></iframe>
         </div>
+        <div class="err" id="err"></div>
         <div class="actions" id="actions">
           <button class="btn primary" id="publish">Publish it — free</button>
           <a class="btn ghost" id="board-link" href="/board">Meet your ops team</a>
@@ -228,6 +230,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         </div>
         <div class="live-url" id="live">Live: <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px">Copy</button></div>
       </div>
+      <aside class="side-col">
+        <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
+        <div class="console">
+          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> the team, live · Vertex AI Agent Engine</div>
+          <div class="body" id="feed" aria-live="polite"></div>
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -272,7 +281,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     [/orchestrator/i, 'theo']
   ];
   const COLORS = { theo:'#784BD1', brief:'#6C5CE7', leo:'#0073EA', noa:'#F857C1', sam:'#00C875', phoenix:'#B14DF0', max:'#FF7235', orchestrator:'#A4A9C0' };
-  let lastBuild = null, agentsRan = new Set(), feedCount = 0;
+  let lastBuild = null, draftBuild = null, agentsRan = new Set(), feedCount = 0;
   const lastByAgent = {};   // persona -> last meaningful action line (for the operate board)
   const feedByAgent = {};   // persona -> last 3 meaningful lines (operate-board activity feed)
   let seoScore = null;
@@ -409,6 +418,9 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('show').style.display = 'block';
     $('show-sub').textContent = (brief.business || 'your business') + ' · ' + $('category').selectedOptions[0].text;
     $('err').style.display = 'none';
+    lastBuild = null; draftBuild = null;
+    $('preview').style.display = 'none';
+    $('pstate').className = 'pstate';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // instant feedback — Theo greets before the first engine byte arrives
@@ -442,7 +454,18 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
           if (ev.type === 'phase') phase(ev.n);
           else if (ev.type === 'step') feed(ev.agent, ev.text);
-          else if (ev.type === 'image') { heroImage = ev.url; feed('layout_agent', 'Hero photography is in — picked from our Gemini image studio.'); }
+          else if (ev.type === 'image') { heroImage = ev.url; if (draftBuild && !draftBuild.heroImage) draftBuild.heroImage = ev.url; feed('layout_agent', 'Hero photography is in — picked from our Gemini image studio.'); }
+          else if (ev.type === 'draft') {
+            if (!lastBuild) {
+              draftBuild = { spec: ev.spec, heroImage: heroImage };
+              $('frame').srcdoc = ev.html;
+              $('purl').textContent = (brief.business || 'your business') + ' — first draft · the team is refining it live';
+              $('pstate').textContent = 'first draft';
+              $('pstate').className = 'pstate draft';
+              $('show-title').textContent = 'First draft is up — the team is refining it';
+              $('preview').style.display = 'block';
+            }
+          }
           else if (ev.type === 'site') {
             lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
             document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
@@ -450,6 +473,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
             $('show-title').textContent = 'Your site is ready';
             $('frame').srcdoc = ev.html;
             $('purl').textContent = (ev.spec.business || 'your-site') + ' — built live by the crew';
+            $('pstate').textContent = 'refined by the team';
+            $('pstate').className = 'pstate done';
             $('preview').style.display = 'block';
             $('actions').style.display = 'flex';
             $('preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -458,10 +483,15 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         }
       }
     } catch (e) {
-      $('err').textContent = (e.message || e);
       $('err').style.display = 'block';
       $('actions').style.display = 'flex';
-      $('publish').style.display = 'none';
+      if (!lastBuild && draftBuild) {
+        lastBuild = draftBuild;
+        $('err').textContent = 'The live crew hit a snag mid-run — your first draft below is ready and publishable; build again for the fully refined version.';
+      } else {
+        $('err').textContent = (e.message || e);
+        if (!lastBuild) $('publish').style.display = 'none';
+      }
     } finally {
       $('go').disabled = false;
     }

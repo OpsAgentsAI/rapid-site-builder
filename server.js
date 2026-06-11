@@ -153,6 +153,13 @@ app.post('/api/build', async (req, res) => {
 
   try {
     send({ type: 'start', brief: { business: brief.business, category: brief.category, lang: brief.lang } });
+    // Instant first draft — the deterministic spec renders in milliseconds and the
+    // crew then refines it live; a cache-hit hero (≤1.2s) rides along when ready.
+    try {
+      const draftHero = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 1200))]);
+      const draftSpec = fallbackSpec(brief);
+      send({ type: 'draft', spec: draftSpec, html: render(draftSpec, { heroImage: draftHero || null }) });
+    } catch { /* draft is best-effort — never blocks the real build */ }
     let lastPhase = -1;
     const result = await engine.runBuild(brief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }

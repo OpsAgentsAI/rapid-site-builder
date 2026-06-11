@@ -74,7 +74,13 @@
     if (state && state.url) stats.push(['Live', 'shipped to the web']);
     $('stats').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
 
+    // The needs-you strip only exists for a real site — on an empty board there
+    // is no decision to take (the roster's Uri card keeps its tagged sample gate).
     const needs = $('needs');
+    if (!(state && state.url)) {
+      needs.style.display = 'none';
+      return;
+    }
     needs.style.display = 'flex';
     $('needs-tx').innerHTML = '<b>One decision waits for you</b> — Uri proposes a core update (sample item). Everything else is handled.';
     $('needs-later').onclick = () => { needs.style.display = 'none'; };
