@@ -59,6 +59,16 @@ function rateOk(req) {
   return true;
 }
 
+// For English builds, drop Hebrew lines from streamed agent text — the deployed
+// crew's copy agent drafts bilingually by instruction; the English-only surface
+// shows only the English lines (the final spec/site are English regardless).
+const HEBREW_RE = /[֐-׿יִ-ﭏ]/;
+function englishOnly(text) {
+  if (!HEBREW_RE.test(text)) return text;
+  const kept = String(text).split('\n').filter(l => !HEBREW_RE.test(l)).join('\n').trim();
+  return kept;
+}
+
 function cleanBrief(body) {
   const s = (v, n) => String(v == null ? '' : v).slice(0, n).trim();
   const brief = {
@@ -99,7 +109,8 @@ app.post('/api/build', async (req, res) => {
     let lastPhase = -1;
     const { spec } = await engine.runBuild(brief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
-      send({ type: 'step', agent: step.agent, text: step.text });
+      const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
+      if (text) send({ type: 'step', agent: step.agent, text });
     });
     const heroImage = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
     const html = render(spec, { heroImage });
@@ -158,7 +169,8 @@ app.post('/api/ask', async (req, res) => {
       (he ? ' Reply in Hebrew.' : ' Reply in English only.') +
       '\n\nClient request: ' + msg;
     const reply = await engine.oneTurn(prompt);
-    res.json({ reply: reply.slice(0, 1200) });
+    const out = he ? reply : (englishOnly(reply) || reply);
+    res.json({ reply: out.slice(0, 1200) });
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
   }
