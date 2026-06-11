@@ -6,6 +6,10 @@
  * the single interaction, and "Ask the team" reaches the live orchestrator
  * only when the client wishes. */
 (() => {
+  // Injected at deploy: the Cloud Run service URL (Ask-Theo calls it directly —
+  // the Hosting proxy caps long requests).
+  const RAW_API = '__API_BASE__';
+  const API = RAW_API.startsWith('http') ? RAW_API : '';
   const $ = (id) => document.getElementById(id);
   const state = (() => {
     try { return JSON.parse(sessionStorage.getItem('operate_state') || 'null'); } catch { return null; }
@@ -166,7 +170,7 @@
     reply.style.display = 'block';
     reply.textContent = t('thinking');
     try {
-      const r = await fetch('/api/ask', {
+      const r = await fetch(API + '/api/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: q,

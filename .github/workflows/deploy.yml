@@ -43,7 +43,7 @@ jobs:
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 512Mi --cpu 1 --timeout 600 --max-instances 5 \
-            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=us-central1,WARM_KEY=${{ secrets.WARM_KEY }}" \
+            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=us-central1,WARM_KEY=${{ secrets.WARM_KEY }},PUBLIC_BASE_URL=https://rapid-site-builder.web.app,ALLOWED_ORIGINS=https://rapid-site-builder.web.app" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
           gcloud run services update-traffic "$SERVICE" --to-latest \
@@ -58,6 +58,10 @@ jobs:
 
       - name: Deploy Firebase Hosting
         run: |
+          # Bake the Cloud Run URL into the static pages: long SSE builds must
+          # bypass the Hosting proxy (it caps streaming responses ~60s).
+          URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
           npm install -g firebase-tools@13 >/dev/null 2>&1
           firebase deploy --only "hosting:$HOSTING_SITE" --project "$PROJECT_ID" --non-interactive
 

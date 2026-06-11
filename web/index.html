@@ -213,6 +213,10 @@ footer b{color:var(--ink)}
 
 <script>
 (() => {
+  // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
+  // service directly — the Hosting proxy caps streaming responses (~60s).
+  const RAW_API = '__API_BASE__';
+  const API = RAW_API.startsWith('http') ? RAW_API : '';
   const $ = (id) => document.getElementById(id);
   const AGENT_MAP = [
     [/business_research|research/i, 'brief'],
@@ -302,7 +306,7 @@ footer b{color:var(--ink)}
 
     let heroImage = null;
     try {
-      const r = await fetch('/api/build', {
+      const r = await fetch(API + '/api/build', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brief)
       });
       if (!r.ok || !r.body) {
@@ -355,7 +359,7 @@ footer b{color:var(--ink)}
     $('publish').disabled = true;
     $('publish').textContent = 'Publishing…';
     try {
-      const r = await fetch('/api/publish', {
+      const r = await fetch(API + '/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(lastBuild)
       });

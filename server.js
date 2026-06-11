@@ -26,6 +26,24 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'web'), { index: false }));
 
 const PORT = process.env.PORT || 8080;
+// Long SSE builds must bypass the Hosting→Cloud Run proxy (it caps streaming
+// around 60s), so the frontend calls this service's own URL cross-origin.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://rapid-site-builder.web.app')
+  .split(',').map(s => s.trim()).filter(Boolean);
+app.use('/api', (req, res, next) => {
+  const origin = req.get('origin') || '';
+  if (ALLOWED_ORIGINS.includes(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+// Pretty public base for published-site URLs (the Hosting domain serves
+// /sites/* fine — those are quick GETs, not streams).
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
 // ---- simple per-IP rate limit (builds are the expensive op) -------------------
 const RATE = new Map(); // ip -> [timestamps]
@@ -106,7 +124,8 @@ app.post('/api/publish', async (req, res) => {
     const id = await saveSite(html, { business: String(spec.business).slice(0, 120) });
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
     const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
-    res.json({ id, url: `${proto}://${host}/sites/${id}` });
+    const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+    res.json({ id, url: `${base}/sites/${id}` });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
   }
