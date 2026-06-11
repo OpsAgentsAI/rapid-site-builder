@@ -253,7 +253,10 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
   </div>
 
   <div class="mysites" id="mysites" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:24px">
-    <div style="font:700 14px var(--font-display);margin-bottom:10px">Your sites <span style="font-size:11px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-inline-start:8px">saved on this device</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font:700 14px var(--font-display)">Your sites <span id="mysites-label" style="font-size:11px;color:var(--ink-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-inline-start:8px">saved on this device</span></div>
+      <span id="mysites-acct" style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-3)"></span>
+    </div>
     <div id="mysites-list" style="display:flex;gap:8px;flex-wrap:wrap"></div>
   </div>
 
@@ -290,6 +293,7 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
   </p>
 </div>
 <script src="/device.js"></script>
+<script src="/auth.js"></script>
 <script src="/board/board.js"></script>
 </body>
 </html>

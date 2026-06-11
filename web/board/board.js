@@ -628,10 +628,14 @@
     }
   }
 
+  const ACCT_BTN = 'border:1px solid var(--border);background:var(--surface-sunken);border-radius:var(--radius-pill);padding:6px 13px;font:600 12.5px var(--font-display);color:var(--ink-2);cursor:pointer';
+
+  // My Sites. The device-memory flow (card jvsQp6cS) runs for everyone and is
+  // the ENTIRE behavior on the auth-off deploy. When sign-in is configured
+  // (card VI673sym) an account overlay layers on top: signed in → the account's
+  // sites cross-device; signed out → the device list + a sign-in chip. So the
+  // auth-off board behaves exactly as it did before the login gate landed.
   async function renderMySites() {
-    // Local list paints first (instant), then the server's device-keyed list
-    // merges in (card jvsQp6cS) — so sites survive a cleared localStorage and
-    // show up from any page that knows this device id. No sign-in involved.
     let mine = [];
     try { mine = JSON.parse(localStorage.getItem('my_sites') || '[]'); } catch { /* noop */ }
     mySites = mine;
@@ -649,12 +653,35 @@
         try { localStorage.setItem('my_sites', JSON.stringify(mine.slice(0, 20))); } catch { /* noop */ }
         mySites = mine;
         paintMySites(mine);
-        // The server list may add the deep-linked / additional sites — re-render
-        // the switcher against the full merged list (reuses this same fetch; no
-        // new network call).
+        // The server list may add deep-linked / cross-page sites — re-render the
+        // switcher against the merged list (reuses this fetch; no new request).
         renderSwitcher();
       }
     } catch { /* offline or server unreachable — the local list already painted */ }
+
+    // ---- account overlay — only on the auth-enabled (real-app) deploy ----
+    if (!window.RSB_AUTH) return;
+    let cfg;
+    try { cfg = await RSB_AUTH.config(); } catch { return; }
+    if (!cfg || !cfg.authEnabled) return; // auth-off deploy: device memory is the whole story
+    if (cfg.me) {
+      let acct = [];
+      try {
+        acct = (await RSB_AUTH.mySites())
+          .map(s => ({ id: s.id, url: s.url, business: s.business, at: Date.parse(s.createdAt) || 0 }));
+      } catch { /* keep the device list painted above */ }
+      if (acct.length) { mySites = acct; paintMySites(acct); renderSwitcher(); }
+      $('mysites').style.display = 'block';
+      $('mysites-label').textContent = 'on your account';
+      $('mysites-acct').innerHTML = `<span>${esc(cfg.me.email || 'signed in')}</span><button id="acct-out" style="${ACCT_BTN}">Sign out</button>`;
+      $('acct-out').addEventListener('click', () => RSB_AUTH.signOut().then(() => location.reload()));
+    } else {
+      // signed out on an auth-on deploy: invite sign-in (device list stays painted).
+      $('mysites').style.display = 'block';
+      $('mysites-acct').innerHTML = `<button id="acct-in" style="${ACCT_BTN}">Sign in — see your sites on any device</button>`;
+      $('acct-in').addEventListener('click', () =>
+        RSB_AUTH.signIn().then(() => renderMySites()).catch(() => { /* user closed the popup */ }));
+    }
   }
 
   function paintMySites(mine) {
