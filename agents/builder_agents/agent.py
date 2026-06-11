@@ -23,6 +23,14 @@ from __future__ import annotations
 import os
 import sys
 
+# Gemini 3 preview models are served from the GLOBAL Vertex endpoint only.
+# GOOGLE_CLOUD_LOCATION is reserved in Agent Engine env_vars (the runtime
+# injects its own region), so when BUILDER_USE_GLOBAL=1 we override the
+# process env here at import time — before the ADK builds its genai client —
+# which routes model calls to the global endpoint.
+if os.environ.get("BUILDER_USE_GLOBAL") == "1":
+    os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+
 from google.adk.agents import Agent
 
 from .tools import arize_mcp_config_from_env, business_research, layout_proposal, seo_audit

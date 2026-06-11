@@ -49,6 +49,7 @@ REQUIREMENTS = [
 
 _RUNTIME_ENV_KEYS = (
     "BUILDER_MODEL",
+    "BUILDER_USE_GLOBAL",
     "ARIZE_MCP_URL",
     "ARIZE_MCP_API_KEY",
     "ARIZE_MCP_AUTH_HEADER",
@@ -85,11 +86,15 @@ def main() -> int:
     vertexai.init(project=PROJECT, location=LOCATION, staging_bucket=STAGING_BUCKET)
     app = AdkApp(agent=root_agent, enable_tracing=True)
 
+    # extra_packages must be RELATIVE so the runtime tar lands `builder_agents/`
+    # at import root — an absolute path produced "No module named 'builder_agents'"
+    # at engine boot (control-plane UserCodeControlPlaneError).
+    os.chdir(_AGENTS_DIR)
     remote = agent_engines.create(
         app,
         display_name="rapid-site-builder-crew",
         requirements=REQUIREMENTS,
-        extra_packages=[os.path.join(_AGENTS_DIR, "builder_agents")],
+        extra_packages=["builder_agents"],
         env_vars=_runtime_env(),
     )
     print("RESOURCE_NAME=%s" % remote.resource_name)
