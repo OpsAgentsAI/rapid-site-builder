@@ -63,18 +63,23 @@ const RATE_MAX = Number(process.env.BUILDS_PER_HOUR_PER_IP) || 12;
 const UPLOAD_RATE_MAX = Number(process.env.UPLOADS_PER_HOUR_PER_IP) || 30;
 function limiter(max) {
   const hits = new Map(); // ip -> [timestamps]
-  return (req) => {
-    // req.ip honors trust-proxy(1): the GFE-appended XFF entry, not the
-    // spoofable leftmost hop. Never parse X-Forwarded-For by hand here.
-    const ip = String(req.ip || '').trim() || 'unknown';
+  // req.ip honors trust-proxy(1): the GFE-appended XFF entry, not the
+  // spoofable leftmost hop. Never parse X-Forwarded-For by hand here.
+  const key = (req) => String(req.ip || '').trim() || 'unknown';
+  const live = (ip, now) => (hits.get(ip) || []).filter(t => now - t < 3600_000);
+  const take = (req) => {
+    const ip = key(req);
     const now = Date.now();
-    const arr = (hits.get(ip) || []).filter(t => now - t < 3600_000);
+    const arr = live(ip, now);
     if (arr.length >= max) return false;
     arr.push(now);
     hits.set(ip, arr);
     if (hits.size > 5000) hits.clear(); // crude memory guard
     return true;
   };
+  // Non-consuming check: lets one budget gate another route without burning a slot.
+  take.peek = (req) => live(key(req), Date.now()).length < max;
+  return take;
 }
 const rateOk = limiter(RATE_MAX);         // builds are the expensive op
 const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
@@ -341,6 +346,11 @@ app.get('/api/my-sites', async (req, res) => {
 // re-verified from object metadata before anything is used in a build.
 app.post('/api/uploads/sign', async (req, res) => {
   if (!uploads.ENABLED) return res.status(503).json({ error: 'Uploads are not enabled on this deployment.' });
+  // Signed URLs are write-capable — they live under the BUILD budget too: an
+  // IP that exhausted its builds has no legitimate reason to keep minting
+  // them (review finding 1). peek() doesn't consume a build slot, so a normal
+  // pre-build upload burst never eats into the visitor's builds.
+  if (!rateOk.peek(req)) return res.status(429).json({ error: 'Rate limit reached — try again in a bit.' });
   if (!uploadRateOk(req)) return res.status(429).json({ error: 'Upload limit reached — try again in a bit.' });
   try {
     const body = req.body || {};
@@ -483,4 +493,4 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`rapid-site-builder on :${PORT}`));
 }
 
-module.exports = { app, cleanBrief };
+module.exports = { app, cleanBrief, limiter };
