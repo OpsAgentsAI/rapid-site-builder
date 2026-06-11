@@ -3,8 +3,11 @@
     site_builder_orchestrator (root_agent)
       |- business_research_agent  -> brand brief from a one-line description
       |- layout_agent (Leo)       -> block sequence + rationale
+      |- ux_agent (Dana)          -> UX-flow review of the block sequence
+      |- visual_agent (Remy)      -> visual design system from the brief's vibe
       |- copy_agent (Noa)         -> HE/EN copy per block
       |- seo_agent (Sam)          -> SEO score + fixes
+      |- frontend_agent (Kai)     -> pre-ship frontend checklist
       `- observability_agent (Phoenix) -> records the run to Arize Phoenix via MCP
 
 Google-native end to end: Gemini on Vertex AI through the ADK (google-adk).
@@ -50,7 +53,15 @@ if os.environ.get("BUILDER_USE_GLOBAL") == "1":
 
 from google.adk.agents import Agent
 
-from .tools import arize_mcp_config_from_env, business_research, layout_proposal, seo_audit
+from .tools import (
+    arize_mcp_config_from_env,
+    business_research,
+    frontend_check,
+    layout_proposal,
+    seo_audit,
+    ux_flow_review,
+    visual_system,
+)
 
 try:
     from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
@@ -104,6 +115,32 @@ layout_agent = Agent(
     tools=[layout_proposal],
 )
 
+ux_agent = Agent(
+    name="ux_agent",
+    model=MODEL,
+    description="Dana — reviews the page's UX flow against conversion best practice.",
+    instruction=(
+        "You are Dana, the UX specialist. Given the proposed block sequence, call "
+        "ux_flow_review with the blocks and the brief's audience, then report the "
+        "flow score and walk through each issue with a concrete reordering fix. "
+        "Respect Leo's layout intent — you tune the journey, not the blocks."
+    ),
+    tools=[ux_flow_review],
+)
+
+visual_agent = Agent(
+    name="visual_agent",
+    model=MODEL,
+    description="Remy — derives the visual design system from the brief's vibe.",
+    instruction=(
+        "You are Remy, the visual designer. Call visual_system with the brief's "
+        "vibe and category and present the system — palette, type pairing, corners, "
+        "imagery direction, spacing — with one sentence on why it fits this "
+        "business. Never contradict the brief's vibe."
+    ),
+    tools=[visual_system],
+)
+
 copy_agent = Agent(
     name="copy_agent",
     model=MODEL,
@@ -128,6 +165,19 @@ seo_agent = Agent(
         "and the one most impactful fix."
     ),
     tools=[seo_audit],
+)
+
+frontend_agent = Agent(
+    name="frontend_agent",
+    model=MODEL,
+    description="Kai — runs the pre-ship frontend checklist on the assembled page.",
+    instruction=(
+        "You are Kai, the frontend builder. Assemble a page dict from the draft "
+        "(h1_count, description, has_scripts, mobile_ready, images_have_alt), call "
+        "frontend_check on it and report pass/fail per item, the single most "
+        "important fix first. Published pages must stay script-free."
+    ),
+    tools=[frontend_check],
 )
 
 observability_agent = Agent(
@@ -158,5 +208,14 @@ root_agent = Agent(
         "publishing is human-approved outside this crew. When asked for the final "
         "site spec, return ONLY the strict JSON object requested, no prose."
     ),
-    sub_agents=[business_research_agent, layout_agent, copy_agent, seo_agent, observability_agent],
+    sub_agents=[
+        business_research_agent,
+        layout_agent,
+        ux_agent,
+        visual_agent,
+        copy_agent,
+        seo_agent,
+        frontend_agent,
+        observability_agent,
+    ],
 )

@@ -147,3 +147,97 @@ def arize_mcp_config_from_env() -> dict | None:
         except (ValueError, TypeError):
             pass
     return {"url": url, "headers": headers}
+
+
+CANONICAL_FLOW = ["hero", "about", "items", "why", "cta", "contact"]
+
+
+def ux_flow_review(blocks: list = None, audience: str = "") -> dict:
+    """Review a proposed block sequence against the canonical conversion flow.
+
+    Deterministic: checks hero-first, proof-before-ask and ends-on-action
+    ordering, flags duplicates and non-canonical blocks. Returns a 0-100 flow
+    score plus ordered issues the UX agent (Dana) narrates. Never raises.
+    """
+    seq = [str(b).strip().lower() for b in (blocks or []) if str(b).strip()]
+    if not seq:
+        return {"score": 0, "audience": audience or "general",
+                "issues": ["no blocks proposed — fall back to the canonical flow"],
+                "canonical": CANONICAL_FLOW}
+    score, issues = 100, []
+    if seq[0] != "hero":
+        score -= 25; issues.append("hero is not first — visitors decide in the first screen")
+    if "cta" in seq and "why" in seq and seq.index("cta") < seq.index("why"):
+        score -= 15; issues.append("ask comes before proof — move 'why' above the CTA")
+    if seq[-1] not in ("cta", "contact"):
+        score -= 20; issues.append("page does not end on an action — close with cta or contact")
+    dupes = sorted({b for b in seq if seq.count(b) > 1})
+    if dupes:
+        score -= 10; issues.append("duplicate blocks: " + ", ".join(dupes))
+    unknown = sorted({b for b in seq if b not in CANONICAL_FLOW})
+    if unknown:
+        issues.append("non-canonical blocks (fine if intentional): " + ", ".join(unknown))
+    return {"score": max(0, score), "audience": audience or "general",
+            "issues": issues or ["flow follows conversion best practice"],
+            "canonical": CANONICAL_FLOW}
+
+
+VIBE_SYSTEMS = {
+    "warm": {"palette": "cream / terracotta / espresso",
+             "type_pairing": "serif display + humanist sans body",
+             "corners": "soft (16px)",
+             "imagery": "natural light, close textures, people mid-moment",
+             "spacing": "generous, airy sections"},
+    "bold": {"palette": "ink / electric accent / white",
+             "type_pairing": "heavy grotesque display + tight sans body",
+             "corners": "sharp (4px)",
+             "imagery": "high contrast, strong color blocking",
+             "spacing": "dense hero, wide rhythm below"},
+    "trust": {"palette": "deep navy / slate / warm gray",
+              "type_pairing": "transitional serif + neutral sans",
+              "corners": "subtle (8px)",
+              "imagery": "real team, real place — no stock clichés",
+              "spacing": "even, predictable grid"},
+    "fresh": {"palette": "white / leaf green / citrus accent",
+              "type_pairing": "rounded sans throughout",
+              "corners": "round (20px)",
+              "imagery": "motion, outdoors, bright daylight",
+              "spacing": "open, lots of whitespace"},
+    "modern": {"palette": "near-black / off-white / single neon accent",
+               "type_pairing": "geometric sans display + mono details",
+               "corners": "medium (12px)",
+               "imagery": "product UI, abstract gradients",
+               "spacing": "tight hero, modular grid"},
+}
+
+
+def visual_system(vibe: str = "", category: str = "") -> dict:
+    """Derive the deterministic visual design system for a vibe.
+
+    Returns palette, type pairing, corner radius, imagery direction and spacing
+    rules the visual agent (Remy) elaborates on. Unknown vibes fall back to the
+    category's default vibe, then to 'modern'. Never raises.
+    """
+    v = (vibe or "").strip().lower()
+    if v not in VIBE_SYSTEMS:
+        v = INDUSTRIES.get((category or "").strip().lower(), {}).get("vibe", "modern")
+    return {"vibe": v, **VIBE_SYSTEMS.get(v, VIBE_SYSTEMS["modern"])}
+
+
+def frontend_check(page: dict = None) -> dict:
+    """Pre-ship frontend checklist for the assembled page dict.
+
+    Deterministic pass/fail items (single H1, meta description, script-free,
+    mobile breakpoint, image alts) the frontend agent (Kai) reports on.
+    Never raises.
+    """
+    p = page if isinstance(page, dict) else {}
+    checks = {
+        "single_h1": int(p.get("h1_count", 1) or 0) == 1,
+        "meta_description": bool(str(p.get("description", "")).strip()),
+        "script_free": not bool(p.get("has_scripts", False)),
+        "mobile_breakpoint": bool(p.get("mobile_ready", True)),
+        "image_alts": bool(p.get("images_have_alt", True)),
+    }
+    failed = [k for k, ok in checks.items() if not ok]
+    return {"pass": not failed, "checks": checks, "failed": failed}
