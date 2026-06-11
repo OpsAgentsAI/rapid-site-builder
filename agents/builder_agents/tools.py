@@ -8,39 +8,37 @@ from __future__ import annotations
 
 import json
 import os
-import re
 
-_HEBREW = re.compile(r"[֐-׿יִ-ﭏ]")
 
 INDUSTRIES = {
-    "food_beverage": {"keywords": ["cafe", "coffee", "bakery", "restaurant", "bar", "קפה", "מאפ", "מסעד"],
+    "food_beverage": {"keywords": ["cafe", "coffee", "bakery", "restaurant", "bar"],
                       "audience": "locals and regulars who value freshness and atmosphere",
                       "tone": "warm, sensory, inviting", "vibe": "warm", "layout": "catalog"},
-    "retail": {"keywords": ["shop", "store", "boutique", "חנות"],
+    "retail": {"keywords": ["shop", "store", "boutique"],
                "audience": "shoppers looking for curated, quality products",
                "tone": "crisp, friendly, confident", "vibe": "bold", "layout": "catalog"},
-    "beauty": {"keywords": ["salon", "spa", "beauty", "nails", "יופי", "ספא"],
+    "beauty": {"keywords": ["salon", "spa", "beauty", "nails"],
                "audience": "clients seeking self-care and a premium feel",
                "tone": "serene, polished, indulgent", "vibe": "warm", "layout": "booking"},
-    "health": {"keywords": ["clinic", "dental", "doctor", "therapy", "מרפא", "קליניק"],
+    "health": {"keywords": ["clinic", "dental", "doctor", "therapy"],
                "audience": "patients who need reassurance and clarity",
                "tone": "calm, professional, caring", "vibe": "trust", "layout": "booking"},
-    "fitness": {"keywords": ["gym", "fitness", "pilates", "yoga", "studio", "כושר", "יוגה"],
+    "fitness": {"keywords": ["gym", "fitness", "pilates", "yoga", "studio"],
                 "audience": "people building a routine that fits their life",
                 "tone": "energetic, encouraging, no-nonsense", "vibe": "fresh", "layout": "booking"},
-    "professional": {"keywords": ["agency", "consult", "law", "account", "משרד", "ייעוץ"],
+    "professional": {"keywords": ["agency", "consult", "law", "account"],
                      "audience": "businesses choosing a partner they can rely on",
                      "tone": "assured, specific, results-led", "vibe": "trust", "layout": "services"},
-    "tech": {"keywords": ["app", "saas", "software", "startup", "ai", "סטארטאפ"],
+    "tech": {"keywords": ["app", "saas", "software", "startup", "ai"],
              "audience": "early adopters and teams evaluating tools",
              "tone": "sharp, modern, benefit-first", "vibe": "modern", "layout": "services"},
-    "real_estate": {"keywords": ["real estate", "realty", "homes", 'נדל"ן', "דירות"],
+    "real_estate": {"keywords": ["real estate", "realty", "homes"],
                     "audience": "buyers and sellers making their biggest decision",
                     "tone": "trustworthy, local, personal", "vibe": "trust", "layout": "services"},
-    "education": {"keywords": ["school", "course", "tutor", "לימוד", "קורס"],
+    "education": {"keywords": ["school", "course", "tutor"],
                   "audience": "learners and parents investing in growth",
                   "tone": "encouraging, clear, credible", "vibe": "fresh", "layout": "services"},
-    "events": {"keywords": ["event", "wedding", "venue", "catering", "אירוע", "חתונ"],
+    "events": {"keywords": ["event", "wedding", "venue", "catering"],
                "audience": "people planning a day they will remember",
                "tone": "celebratory, elegant, organized", "vibe": "bold", "layout": "services"},
 }
@@ -51,8 +49,8 @@ def business_research(description: str, name: str = "", category: str = "",
     """Produce a brand brief from a one-line business description.
 
     Deterministic: classifies the industry (explicit category wins, else keyword
-    scan), detects Hebrew, and derives audience/tone/vibe/layout defaults the
-    downstream agents elaborate on. Never raises.
+    scan) and derives audience/tone/vibe/layout defaults the downstream agents
+    elaborate on. Never raises.
     """
     text = f"{name} {description}".strip()
     cat = (category or "").strip().lower()
@@ -65,7 +63,7 @@ def business_research(description: str, name: str = "", category: str = "",
                 break
         cat = cat or "professional"
     ind = INDUSTRIES[cat]
-    he = language == "he" or bool(_HEBREW.search(text))
+    he = language == "he"
     return {
         "business_name": name or (description.split(",")[0][:60] if description else "New Business"),
         "category": cat,

@@ -11,9 +11,9 @@ Built for the Google Cloud Rapid Agent Hackathon. Google-native end to end:
 
 ## The experience
 
-1. **Intake (~30 seconds, no login):** business name · category · one line about it · language (EN/עברית) · optional vibe.
+1. **Intake (~30 seconds, no login):** business name · category · one line about it · optional vibe.
 2. **The agents show:** the crew streams live — Brief researches, Leo lays out, Noa writes, Sam scores SEO, Phoenix traces the run to Arize — every real `function_call` visible.
-3. **The payoff:** a polished one-page site renders in an inline preview (RTL-correct Hebrew included).
+3. **The payoff:** a polished one-page site renders in an inline preview.
 4. **Publish — free:** one click ships it to a real shareable URL (`/sites/{id}`), server-side rendered.
 5. **The operate board:** the client lands with **Theo the orchestrator** front and center — the team now *runs* the site (monitoring, updates, security). The client never has to do anything; they can talk to Theo only when they wish ("Ask the team" sends a real turn to the live Agent Engine), and the rare decision arrives as a single calm approval.
 
@@ -24,7 +24,7 @@ web/                 static frontend (landing show + operate board)
 server.js            Express on Cloud Run — SSE /api/build, /api/publish, /sites/:id, /api/ask
 lib/engine.js        Vertex AI Agent Engine driver (create_session + phased stream_query,
                      incremental SSE — one ADK turn ends at the first agent transfer)
-lib/renderer.js      deterministic site renderer (4 layouts × 5 vibe palettes, RTL, no scripts)
+lib/renderer.js      deterministic site renderer (4 layouts × 5 vibe palettes, no scripts)
 lib/images.js        Gemini image gen + GCS cache keyed by category/style (recyclable art)
 lib/store.js         published sites in GCS, served at /sites/:id
 agents/              the ADK crew source (google-adk) + deterministic tools
