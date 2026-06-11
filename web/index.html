@@ -410,6 +410,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('err').style.display = 'none';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
+    // instant feedback — Theo greets before the first engine byte arrives
+    phase(0);
+    setPill('theo', 'w');
+    agentsRan.add('theo');
+    feed('opsagents_builder_orchestrator',
+      `Got it — ${brief.business || 'your business'}. Briefing the team now; Aria opens with research.`);
+
     let heroImage = null;
     try {
       const r = await fetch(API + '/api/build', {
