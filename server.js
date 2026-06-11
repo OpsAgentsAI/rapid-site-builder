@@ -236,7 +236,9 @@ app.post('/api/ask', async (req, res) => {
     if (!msg) return res.status(400).json({ error: 'Empty message.' });
     const business = String((req.body && req.body.business) || '').slice(0, 120);
     const url = String((req.body && req.body.url) || '').slice(0, 200);
-    const he = (req.body && req.body.lang) === 'he';
+    // Mirror the question's language; the message text wins over the client's lang
+    // field (a mislabeled client must not strip a legit Hebrew answer or vice versa).
+    const he = HEBREW_RE.test(msg) || (req.body && req.body.lang) === 'he';
     const prompt =
       'You are Theo, the orchestrator of the AI web team that built and now operates the client\'s website' +
       (business ? ` ("${business}"${url ? ', live at ' + url : ''})` : '') + '. ' +
@@ -246,7 +248,19 @@ app.post('/api/ask', async (req, res) => {
       (he ? ' Reply in Hebrew.' : ' Reply in English only.') +
       '\n\nClient request: ' + msg;
     const reply = await engine.oneTurn(prompt);
-    const out = he ? reply : (englishOnly(reply) || reply);
+    let out = he ? reply : englishOnly(reply);
+    if (!he && !out) {
+      // The bilingual-by-instruction crew can answer fully in Hebrew even when asked
+      // for English — then englishOnly() strips every line and the old `|| reply`
+      // fallback shipped the raw Hebrew verbatim. One translate retry keeps a real
+      // answer; the fixed line below is the last resort, never the Hebrew.
+      try {
+        out = englishOnly(await engine.oneTurn(
+          'Translate this to English for the client. Keep the warm tone. Reply with the translation only:\n\n' + reply
+        ));
+      } catch { /* fall through to the fixed line */ }
+      if (!out) out = 'Theo here — the team drafted that answer in Hebrew and I couldn’t translate it just now. Ask me again in a moment.';
+    }
     res.json({ reply: out.slice(0, 1200) });
   } catch (e) {
     res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
