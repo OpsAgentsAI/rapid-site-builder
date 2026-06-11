@@ -157,7 +157,8 @@ app.post('/api/build', async (req, res) => {
     const result = await engine.runBuild(brief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
       const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
-      if (text) send({ type: 'step', agent: step.agent, text });
+      // skip leftovers with no real content (e.g. a bare "---" divider after filtering)
+      if (text && /[a-zA-Z0-9]/.test(text)) send({ type: 'step', agent: step.agent, text });
     });
     let spec = result.spec;
     if (!spec) {
