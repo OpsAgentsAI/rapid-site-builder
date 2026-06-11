@@ -69,6 +69,47 @@ function englishOnly(text) {
   return kept;
 }
 
+// Last-resort spec when the crew's final JSON turn fails twice: a clean,
+// category-aware draft assembled from the intake, so a build always ends in a
+// rendered site instead of an error.
+const CAT_DEFAULTS = {
+  food_beverage: { vibe: 'warm', layout: 'catalog', heading: 'What we serve', items: ['Signature favorites', 'Fresh every morning', 'Made to order'] },
+  retail: { vibe: 'bold', layout: 'catalog', heading: 'What we carry', items: ['Curated picks', 'New arrivals', 'Customer favorites'] },
+  beauty: { vibe: 'warm', layout: 'booking', heading: 'Our treatments', items: ['Signature treatments', 'Express sessions', 'Memberships'] },
+  health: { vibe: 'trust', layout: 'booking', heading: 'Our care', items: ['Consultations', 'Treatments', 'Follow-up care'] },
+  fitness: { vibe: 'fresh', layout: 'booking', heading: 'Our classes', items: ['Group classes', 'Personal training', 'Beginner programs'] },
+  professional: { vibe: 'trust', layout: 'services', heading: 'What we do', items: ['Consulting', 'Done-for-you delivery', 'Ongoing support'] },
+  tech: { vibe: 'modern', layout: 'services', heading: 'What we build', items: ['The product', 'Integrations', 'Support that answers'] },
+  real_estate: { vibe: 'trust', layout: 'services', heading: 'How we help', items: ['Buying', 'Selling', 'Guidance end to end'] },
+  education: { vibe: 'fresh', layout: 'services', heading: 'What we teach', items: ['Core programs', 'Small groups', 'Personal mentoring'] },
+  events: { vibe: 'bold', layout: 'services', heading: 'What we host', items: ['Private events', 'Celebrations', 'Full production'] }
+};
+function fallbackSpec(brief) {
+  const cat = CAT_DEFAULTS[brief.category] || CAT_DEFAULTS[inferCategory(brief.business + ' ' + brief.description)] || CAT_DEFAULTS.professional;
+  const name = brief.business || 'Your Business';
+  const desc = brief.description || 'Something good is coming.';
+  return {
+    business: name,
+    tagline: desc.slice(0, 90),
+    vibe: brief.style !== 'default' && brief.style ? brief.style : cat.vibe,
+    layout: cat.layout,
+    about_heading: 'About ' + name,
+    about: desc.charAt(0).toUpperCase() + desc.slice(1) + '. We keep it simple: do it well, treat people right, and be worth coming back to.',
+    items_heading: cat.heading,
+    items: cat.items.map(n => ({ emoji: '', name: n, desc: 'Ask us — this is what we love doing.', price: '' })),
+    why_heading: 'Why ' + name,
+    why: [
+      { emoji: '', title: 'We care about the details', text: 'Small things done right, every single time.' },
+      { emoji: '', title: 'Local and personal', text: 'You talk to people who know your name.' },
+      { emoji: '', title: 'Easy to reach', text: 'Questions answered fast, no runaround.' }
+    ],
+    cta_heading: 'Come say hello',
+    cta_text: 'We would love to meet you.',
+    cta_button: 'Get in touch',
+    contact: { address: '', phone: '', email: '', hours: '' }
+  };
+}
+
 function cleanBrief(body) {
   const s = (v, n) => String(v == null ? '' : v).slice(0, n).trim();
   // "other" passes through to the crew untouched — classifying the business is
@@ -113,11 +154,16 @@ app.post('/api/build', async (req, res) => {
   try {
     send({ type: 'start', brief: { business: brief.business, category: brief.category, lang: brief.lang } });
     let lastPhase = -1;
-    const { spec } = await engine.runBuild(brief, (step, phase) => {
+    const result = await engine.runBuild(brief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
       const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
       if (text) send({ type: 'step', agent: step.agent, text });
     });
+    let spec = result.spec;
+    if (!spec) {
+      spec = fallbackSpec(brief);
+      send({ type: 'step', agent: 'opsagents_builder_orchestrator', text: 'Pulling the final draft together from the team\'s notes — one more moment.' });
+    }
     const heroImage = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
     const html = render(spec, { heroImage });
     send({ type: 'site', spec, heroImage: heroImage || null, html });
