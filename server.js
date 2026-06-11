@@ -19,7 +19,7 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites } = require('./lib/store');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -208,8 +208,16 @@ app.post('/api/publish', async (req, res) => {
     if (!spec || !spec.business) return res.status(400).json({ error: 'Missing site spec to publish.' });
     if (JSON.stringify(spec).length > 100_000) return res.status(413).json({ error: 'Spec too large.' });
     const heroImage = String(req.body.heroImage || '');
+    // No-sign-in memory (card jvsQp6cS): a well-formed device id gets stamped
+    // into the site's meta and a devices/<id>/<site> marker so /api/my-sites
+    // can find it again. Malformed ids are simply ignored — never an error.
+    const deviceId = /^[a-f0-9]{32}$/.test(String(req.body.deviceId || '')) ? String(req.body.deviceId) : '';
     const html = render(spec, { heroImage }); // always server-rendered — never client HTML
-    const id = await saveSite(html, { business: String(spec.business).slice(0, 120) });
+    const id = await saveSite(html, {
+      business: String(spec.business).slice(0, 120),
+      ...(deviceId ? { deviceId } : {})
+    });
+    if (deviceId) await rememberDeviceSite(deviceId, id).catch(() => { /* memory is best-effort */ });
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
     const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
     const base = PUBLIC_BASE_URL || `${proto}://${host}`;
@@ -223,6 +231,25 @@ app.get(['/sites/:id', '/sites/:id/'], async (req, res) => {
   const html = await loadSite(req.params.id);
   if (!html) return res.status(404).type('text/plain').send('Site not found');
   res.set('Cache-Control', 'public, max-age=300').type('html').send(html);
+});
+
+// This device's published sites — convenience memory, not authentication (the
+// 128-bit random id is unguessable; possession of it IS the lookup key, same
+// as knowing the site URLs themselves, which are public pages anyway).
+app.get('/api/my-sites', async (req, res) => {
+  const device = String(req.query.device || '');
+  if (!/^[a-f0-9]{32}$/.test(device)) return res.status(400).json({ error: 'Bad device id.' });
+  try {
+    const sites = await listDeviceSites(device);
+    const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+    const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+    res.set('Cache-Control', 'no-store').json({
+      sites: sites.map(s => ({ ...s, url: `${base}/sites/${s.id}` }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
 });
 
 // ---- ask the orchestrator ---------------------------------------------------------

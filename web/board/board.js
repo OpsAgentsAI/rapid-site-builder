@@ -178,9 +178,29 @@
     }
   }
 
-  function renderMySites() {
+  async function renderMySites() {
+    // Local list paints first (instant), then the server's device-keyed list
+    // merges in (card jvsQp6cS) — so sites survive a cleared localStorage and
+    // show up from any page that knows this device id. No sign-in involved.
     let mine = [];
     try { mine = JSON.parse(localStorage.getItem('my_sites') || '[]'); } catch { /* noop */ }
+    paintMySites(mine);
+    try {
+      const r = await fetch(API + '/api/my-sites?device=' + encodeURIComponent(window.RSB_DEVICE || ''));
+      if (r.ok) {
+        const j = await r.json();
+        const known = new Set(mine.map(s => s.id));
+        for (const s of (j.sites || [])) {
+          if (!known.has(s.id)) mine.push({ id: s.id, url: s.url, business: s.business, at: Date.parse(s.createdAt) || 0 });
+        }
+        mine.sort((a, b) => (b.at || 0) - (a.at || 0));
+        try { localStorage.setItem('my_sites', JSON.stringify(mine.slice(0, 20))); } catch { /* noop */ }
+        paintMySites(mine);
+      }
+    } catch { /* offline or server unreachable — the local list already painted */ }
+  }
+
+  function paintMySites(mine) {
     if (!mine.length) return;
     $('mysites').style.display = 'block';
     $('mysites-list').innerHTML = mine.slice(0, 12).map(s =>
