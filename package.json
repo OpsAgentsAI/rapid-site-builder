@@ -1,0 +1,17 @@
+{
+  "name": "rapid-site-builder",
+  "version": "1.0.0",
+  "description": "Describe your business in one line — an AI agent team designs, writes, and ships your website live. Google Cloud Agent Builder (ADK) + Gemini + Arize Phoenix MCP.",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/",
+    "seed-images": "node scripts/seed_images.mjs"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.14.0",
+    "express": "^4.21.2"
+  }
+}

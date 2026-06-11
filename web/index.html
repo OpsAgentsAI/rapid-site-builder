@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Rapid Site Builder — your AI web team, live</title>
+<meta name="description" content="Describe your business in one line. A Google Cloud agent team designs, writes, and ships your website in front of you — free."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#0A0C14;--bg2:#0F1320;--panel:#131829;--panel2:#181F33;--line:#232C47;
+  --ink:#F0F4FF;--dim:#8B97B8;--mono:'JetBrains Mono',monospace;
+  --grad:linear-gradient(135deg,#7C5CFF,#2DD4BF);
+  --g-green:#22C55E;--g-amber:#F59E0B;--g-violet:#7C5CFF;--g-teal:#2DD4BF;--g-pink:#EC4899;--g-blue:#3B82F6;--g-red:#EF4444;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 0%,rgba(124,92,255,.13),transparent 60%),radial-gradient(50% 40% at 85% 10%,rgba(45,212,191,.10),transparent 55%);pointer-events:none}
+h1,h2,h3{font-family:'Sora',sans-serif;line-height:1.12;letter-spacing:-.02em}
+.wrap{max-width:1180px;margin-inline:auto;padding-inline:24px;position:relative}
+header{padding:22px 0}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:12px;font-family:'Sora',sans-serif;font-weight:800;font-size:19px}
+.logo .mk{width:38px;height:38px;border-radius:12px;background:var(--grad);display:grid;place-items:center;font-size:18px}
+.badges{display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:12px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.02)}
+.badge b{color:var(--ink)}
+/* ---------- intake ---------- */
+#intake{padding:44px 0 26px;text-align:center}
+#intake h1{font-size:clamp(34px,5.4vw,58px);max-width:21ch;margin:0 auto 14px;text-wrap:balance}
+#intake h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+#intake .sub{color:var(--dim);font-size:clamp(16px,2vw,18.5px);max-width:60ch;margin:0 auto 36px}
+.formcard{max-width:780px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:30px;text-align:start;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+.frow{display:grid;grid-template-columns:1.2fr .9fr;gap:14px;margin-bottom:14px}
+.frow.three{grid-template-columns:1fr .55fr .55fr}
+@media(max-width:640px){.frow,.frow.three{grid-template-columns:1fr}}
+label{display:block;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
+input,select,textarea{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:13px;color:var(--ink);font:inherit;font-size:15.5px;padding:13px 15px;outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:#7C5CFF}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 18px}
+.chip{font-size:13px;color:var(--dim);border:1px solid var(--line);background:transparent;border-radius:999px;padding:7px 13px;cursor:pointer;transition:all .15s}
+.chip:hover{color:var(--ink);border-color:#7C5CFF}
+.go{width:100%;border:0;border-radius:14px;background:var(--grad);color:#fff;font:700 17px 'Sora',sans-serif;padding:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:transform .15s,box-shadow .15s}
+.go:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(124,92,255,.35)}
+.go:disabled{opacity:.55;cursor:wait;transform:none;box-shadow:none}
+.free{color:var(--dim);font-size:13px;text-align:center;margin-top:12px}
+/* ---------- the show ---------- */
+#show{display:none;padding:30px 0 60px}
+.show-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+.show-head h2{font-size:clamp(22px,3vw,30px)}
+.show-head .who{color:var(--dim);font-size:14.5px}
+.phases{display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap}
+.phase{flex:1;min-width:130px;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);background:var(--panel);display:flex;align-items:center;gap:9px;transition:all .25s}
+.phase .dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex:0 0 9px}
+.phase.active{color:var(--ink);border-color:#7C5CFF;background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(45,212,191,.08))}
+.phase.active .dot{background:var(--g-violet);animation:pulse 1.1s infinite}
+.phase.done{color:var(--ink)}
+.phase.done .dot{background:var(--g-green)}
+@keyframes pulse{50%{opacity:.35}}
+.stage{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start}
+@media(max-width:960px){.stage{grid-template-columns:1fr}}
+/* crew lanes */
+.crew{display:flex;flex-direction:column;gap:12px}
+.agent{display:flex;gap:14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:15px 17px;transition:all .25s;border-inline-start:4px solid var(--line)}
+.agent .av{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:23px;background:var(--bg2);flex:0 0 46px}
+.agent .nm{font-weight:700;font-size:15.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.agent .rl{color:var(--dim);font-size:12.5px;margin-top:1px}
+.agent .last{color:var(--dim);font-size:12.5px;margin-top:6px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.agent .meta{min-width:0;flex:1}
+.pill{margin-inline-start:auto;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:5px 11px;flex:0 0 auto}
+.pill.q{background:rgba(139,151,184,.12);color:var(--dim)}
+.pill.w{background:rgba(245,158,11,.16);color:#FBBF24;animation:pulse 1.2s infinite}
+.pill.d{background:rgba(34,197,94,.16);color:#4ADE80}
+.agent.working{border-inline-start-color:var(--g-amber);box-shadow:0 0 0 1px rgba(245,158,11,.25),0 14px 34px rgba(0,0,0,.35);transform:translateX(4px)}
+.agent.done{border-inline-start-color:var(--g-green)}
+.agent[data-a="brief"] .av{background:rgba(59,130,246,.12)}
+.agent[data-a="leo"] .av{background:rgba(236,72,153,.12)}
+.agent[data-a="noa"] .av{background:rgba(245,158,11,.12)}
+.agent[data-a="sam"] .av{background:rgba(34,197,94,.12)}
+.agent[data-a="phoenix"] .av{background:rgba(124,92,255,.14)}
+.agent[data-a="max"] .av{background:rgba(45,212,191,.12)}
+/* console + preview column */
+.main-col{display:flex;flex-direction:column;gap:20px;min-width:0}
+.console{background:#0B0F1B;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.console .bar{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);font-weight:600}
+.console .bar .lights{display:flex;gap:6px}
+.console .bar .lights i{width:10px;height:10px;border-radius:50%;display:block}
+.console .body{height:300px;overflow-y:auto;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.75}
+.cline{margin-bottom:7px;word-break:break-word;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
+.cline .who{font-weight:600;border-radius:6px;padding:1px 7px;margin-inline-end:8px;font-size:11px}
+.arize-banner{display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(45,212,191,.10));border:1px solid rgba(124,92,255,.45);border-radius:16px;padding:14px 18px;font-size:14.5px}
+.arize-banner b{color:#B7A6FF}
+/* preview */
+.preview{display:none;background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;animation:fadein .4s ease}
+.preview .pbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.preview .pbar .lights{display:flex;gap:6px}
+.preview .pbar .lights i{width:11px;height:11px;border-radius:50%;display:block}
+.preview .url{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:9px;font-family:var(--mono);font-size:12px;color:var(--dim);padding:7px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.preview iframe{width:100%;height:640px;border:0;background:#fff}
+.actions{display:none;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:9px;border:0;border-radius:13px;padding:15px 26px;font:700 15.5px 'Sora',sans-serif;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.btn.primary{background:var(--grad);color:#fff}
+.btn.primary:hover{transform:translateY(-2px);box-shadow:0 16px 36px rgba(124,92,255,.35)}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:#7C5CFF}
+.live-url{display:none;align-items:center;gap:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:13px;padding:12px 16px;font-family:var(--mono);font-size:13.5px;flex-wrap:wrap}
+.live-url a{color:#4ADE80;text-decoration:underline}
+.err{display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:15px 18px;font-size:14.5px;color:#FCA5A5}
+footer{padding:36px 0 28px;color:var(--dim);font-size:13px;text-align:center}
+footer b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><div class="head">
+    <div class="logo"><span class="mk">⚡</span> Rapid Site Builder</div>
+    <div class="badges">
+      <span class="badge">⚙️ <b>Google Cloud Agent Builder</b> (ADK)</span>
+      <span class="badge">✨ <b>Gemini</b> + Nano Banana images</span>
+      <span class="badge">🔭 <b>Arize Phoenix</b> MCP observability</span>
+    </div>
+  </div></header>
+
+  <!-- ============ INTAKE ============ -->
+  <section id="intake">
+    <h1>Meet the AI team that builds your website <em>in front of you</em></h1>
+    <p class="sub">One line about your business. Five specialist agents — research, design, copy, SEO, observability — go to work live. Watch them ship your site. Free.</p>
+    <div class="formcard">
+      <div class="chips" id="chips">
+        <button class="chip" type="button">☕ Neighborhood specialty coffee bar in Tel Aviv</button>
+        <button class="chip" type="button">💪 Boutique pilates studio for busy parents</button>
+        <button class="chip" type="button">🏠 Family real-estate agency, 20 years in the Sharon</button>
+        <button class="chip" type="button">🧁 בית קפה שכונתי עם מאפים מהתנור</button>
+      </div>
+      <div class="frow">
+        <div><label for="business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna"/></div>
+        <div><label for="category">Category</label>
+          <select id="category">
+            <option value="food_beverage">Food &amp; beverage</option>
+            <option value="retail">Retail &amp; shop</option>
+            <option value="beauty">Beauty &amp; wellness</option>
+            <option value="health">Health &amp; clinics</option>
+            <option value="fitness">Fitness &amp; studio</option>
+            <option value="professional" selected>Professional services</option>
+            <option value="tech">Tech &amp; startup</option>
+            <option value="real_estate">Real estate</option>
+            <option value="education">Education</option>
+            <option value="events">Events &amp; hospitality</option>
+          </select>
+        </div>
+      </div>
+      <div class="frow three">
+        <div><label for="description">One line about it</label><input id="description" maxlength="400" placeholder="Specialty coffee roasted in-house, pastries from our own oven"/></div>
+        <div><label for="lang">Site language</label>
+          <select id="lang"><option value="en">English</option><option value="he">עברית</option></select>
+        </div>
+        <div><label for="style">Vibe (optional)</label>
+          <select id="style"><option value="default">Let the team pick</option><option value="warm">Warm</option><option value="fresh">Fresh</option><option value="modern">Modern</option><option value="trust">Trustworthy</option><option value="bold">Bold</option></select>
+        </div>
+      </div>
+      <button class="go" id="go">🚀 Build my site — watch the team work</button>
+      <p class="free">Free · no signup · about two minutes</p>
+    </div>
+  </section>
+
+  <!-- ============ THE AGENTS SHOW ============ -->
+  <section id="show">
+    <div class="show-head">
+      <h2 id="show-title">Your AI team is on it</h2>
+      <span class="who" id="show-sub"></span>
+    </div>
+    <div class="phases" id="phases">
+      <div class="phase" data-p="0"><span class="dot"></span> Research &amp; layout</div>
+      <div class="phase" data-p="1"><span class="dot"></span> Copy &amp; SEO</div>
+      <div class="phase" data-p="2"><span class="dot"></span> Observability</div>
+      <div class="phase" data-p="3"><span class="dot"></span> Final assembly</div>
+    </div>
+    <div class="stage">
+      <div class="crew" id="crew">
+        <div class="agent" data-a="brief"><span class="av">🧭</span><div class="meta"><div class="nm">Brief</div><div class="rl">Business research</div><div class="last"></div></div><span class="pill q">queued</span></div>
+        <div class="agent" data-a="leo"><span class="av">🎨</span><div class="meta"><div class="nm">Leo</div><div class="rl">Layout &amp; art direction</div><div class="last"></div></div><span class="pill q">queued</span></div>
+        <div class="agent" data-a="noa"><span class="av">✍️</span><div class="meta"><div class="nm">Noa</div><div class="rl">Copywriter · EN/HE</div><div class="last"></div></div><span class="pill q">queued</span></div>
+        <div class="agent" data-a="sam"><span class="av">📈</span><div class="meta"><div class="nm">Sam</div><div class="rl">SEO</div><div class="last"></div></div><span class="pill q">queued</span></div>
+        <div class="agent" data-a="phoenix"><span class="av">🔭</span><div class="meta"><div class="nm">Phoenix</div><div class="rl">Observability · Arize MCP</div><div class="last"></div></div><span class="pill q">queued</span></div>
+        <div class="agent" data-a="max"><span class="av">🚀</span><div class="meta"><div class="nm">Max</div><div class="rl">Publisher · human-gated</div><div class="last"></div></div><span class="pill q">queued</span></div>
+      </div>
+      <div class="main-col">
+        <div class="arize-banner" id="arize">🔭 <span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
+        <div class="console">
+          <div class="bar"><span class="lights"><i style="background:#EF4444"></i><i style="background:#F59E0B"></i><i style="background:#22C55E"></i></span> live agent feed · Vertex AI Agent Engine</div>
+          <div class="body" id="feed"></div>
+        </div>
+        <div class="err" id="err"></div>
+        <div class="preview" id="preview">
+          <div class="pbar"><span class="lights"><i style="background:#EF4444"></i><i style="background:#F59E0B"></i><i style="background:#22C55E"></i></span><span class="url" id="purl">preview — built by your agent team</span></div>
+          <iframe id="frame" sandbox title="Generated website preview"></iframe>
+        </div>
+        <div class="actions" id="actions">
+          <button class="btn primary" id="publish">🚀 Publish it — free</button>
+          <a class="btn ghost" id="board-link" href="/board">Meet your ops team →</a>
+          <button class="btn ghost" id="again">↺ Build another</button>
+        </div>
+        <div class="live-url" id="live">✅ Live: <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:8px 14px;font-size:13px">Copy</button></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere.</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const AGENT_MAP = [
+    [/business_research|research/i, 'brief'],
+    [/layout/i, 'leo'],
+    [/copy/i, 'noa'],
+    [/seo/i, 'sam'],
+    [/observability|arize|phoenix/i, 'phoenix'],
+    [/publish/i, 'max']
+  ];
+  const COLORS = { brief:'#3B82F6', leo:'#EC4899', noa:'#F59E0B', sam:'#22C55E', phoenix:'#7C5CFF', max:'#2DD4BF', orchestrator:'#8B97B8' };
+  let lastBuild = null, agentsRan = new Set(), feedCount = 0;
+  const lastByAgent = {};   // persona -> last meaningful action line (for the operate board)
+  let seoScore = null;
+
+  $('chips').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    const t = b.textContent.replace(/^[^ ]+ /, '').trim();
+    $('description').value = t;
+    if (/[֐-׿]/.test(t)) $('lang').value = 'he';
+    if (/coffee|קפה|cafe/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = /קפה/.test(t) ? 'קפה לונה' : 'Cafe Luna'; }
+    else if (/pilates|studio/i.test(t)) { $('category').value = 'fitness'; if (!$('business').value) $('business').value = 'Studio Flow'; }
+    else if (/real-?estate/i.test(t)) { $('category').value = 'real_estate'; if (!$('business').value) $('business').value = 'HaSharon Homes'; }
+  });
+
+  function personaFor(author) {
+    for (const [re, key] of AGENT_MAP) if (re.test(author || '')) return key;
+    return 'orchestrator';
+  }
+  function setPill(key, state, lastText) {
+    const el = document.querySelector(`.agent[data-a="${key}"]`); if (!el) return;
+    el.classList.remove('working', 'done');
+    const pill = el.querySelector('.pill');
+    if (state === 'w') { el.classList.add('working'); pill.className = 'pill w'; pill.textContent = 'working'; }
+    if (state === 'd') { el.classList.add('done'); pill.className = 'pill d'; pill.textContent = 'done'; }
+    if (lastText) el.querySelector('.last').textContent = lastText.slice(0, 90);
+  }
+  function feed(author, text) {
+    const key = personaFor(author);
+    if (key !== 'orchestrator') {
+      agentsRan.add(key); setPill(key, 'w', text);
+      if (!/^→|^🔧/.test(text)) lastByAgent[key] = text.slice(0, 160);
+    }
+    const seoM = text.match(/score[^0-9]{0,12}(\d{1,3})/i);
+    if (seoM && personaFor(author) === 'sam') seoScore = Math.min(100, Number(seoM[1]));
+    const div = document.createElement('div');
+    div.className = 'cline';
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.style.background = (COLORS[key] || '#8B97B8') + '22';
+    who.style.color = COLORS[key] || '#8B97B8';
+    who.textContent = key === 'orchestrator' ? (author || 'team') : key;
+    div.appendChild(who);
+    div.appendChild(document.createTextNode(text.length > 700 ? text.slice(0, 700) + ' …' : text));
+    const body = $('feed');
+    body.appendChild(div);
+    if (++feedCount > 400) body.removeChild(body.firstChild);
+    body.scrollTop = body.scrollHeight;
+    if (key === 'phoenix' && /arize|dataset|phoenix/i.test(text)) $('arize').style.display = 'flex';
+  }
+  function phase(n) {
+    document.querySelectorAll('.phase').forEach(p => {
+      const i = Number(p.dataset.p);
+      p.classList.toggle('active', i === n);
+      p.classList.toggle('done', i < n);
+    });
+    // a new phase means the previous phase's workers are done
+    if (n >= 1) ['brief', 'leo'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
+    if (n >= 2) ['noa', 'sam'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
+    if (n >= 3) agentsRan.has('phoenix') && setPill('phoenix', 'd');
+  }
+
+  async function build() {
+    const brief = {
+      business: $('business').value.trim(),
+      category: $('category').value,
+      description: $('description').value.trim(),
+      lang: $('lang').value,
+      style: $('style').value
+    };
+    if (!brief.business && !brief.description) { $('description').focus(); return; }
+    $('go').disabled = true;
+    $('intake').style.display = 'none';
+    $('show').style.display = 'block';
+    $('show-sub').textContent = (brief.business || 'your business') + ' · ' + $('category').selectedOptions[0].text;
+    $('err').style.display = 'none';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    let heroImage = null;
+    try {
+      const r = await fetch('/api/build', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brief)
+      });
+      if (!r.ok || !r.body) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || ('Build failed (' + r.status + ')'));
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const line = raw.split('\n').find(l => l.startsWith('data:'));
+          if (!line) continue;
+          let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+          if (ev.type === 'phase') phase(ev.n);
+          else if (ev.type === 'step') feed(ev.agent, ev.text);
+          else if (ev.type === 'image') { heroImage = ev.url; feed('nano-banana', '🍌 hero image ready (cached Gemini art): ' + ev.url.split('/').slice(-3).join('/')); }
+          else if (ev.type === 'site') {
+            lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
+            document.querySelectorAll('.phase').forEach(p => p.classList.add('done'));
+            document.querySelectorAll('.phase').forEach(p => p.classList.remove('active'));
+            ['brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
+            $('show-title').textContent = '✨ Your site is ready';
+            $('frame').srcdoc = ev.html;
+            $('purl').textContent = (ev.spec.business || 'your-site') + ' — built live by the crew';
+            $('preview').style.display = 'block';
+            $('actions').style.display = 'flex';
+            $('preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          else if (ev.type === 'error') throw new Error(ev.message);
+        }
+      }
+    } catch (e) {
+      $('err').textContent = '⚠️ ' + (e.message || e);
+      $('err').style.display = 'block';
+      $('actions').style.display = 'flex';
+      $('publish').style.display = 'none';
+    } finally {
+      $('go').disabled = false;
+    }
+  }
+
+  async function publish() {
+    if (!lastBuild) return;
+    $('publish').disabled = true;
+    $('publish').textContent = 'Publishing…';
+    try {
+      const r = await fetch('/api/publish', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lastBuild)
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Publish failed');
+      setPill('max', 'd', 'shipped ' + j.url);
+      agentsRan.add('max');
+      $('live-a').textContent = j.url; $('live-a').href = j.url;
+      $('live').style.display = 'flex';
+      $('publish').style.display = 'none';
+      lastByAgent.max = 'Shipped the site live: ' + j.url;
+      sessionStorage.setItem('operate_state', JSON.stringify({
+        business: lastBuild.spec.business,
+        lang: lastBuild.spec.lang === 'he' ? 'he' : 'en',
+        url: j.url, id: j.id,
+        agentsRan: [...agentsRan],
+        lastByAgent, seoScore,
+        at: Date.now()
+      }));
+    } catch (e) {
+      $('err').textContent = '⚠️ ' + (e.message || e);
+      $('err').style.display = 'block';
+      $('publish').disabled = false;
+      $('publish').textContent = '🚀 Publish it — free';
+    }
+  }
+
+  $('go').addEventListener('click', build);
+  $('publish').addEventListener('click', publish);
+  $('again').addEventListener('click', () => location.reload());
+  $('copy').addEventListener('click', () => navigator.clipboard.writeText($('live-a').href));
+})();
+</script>
+</body>
+</html>

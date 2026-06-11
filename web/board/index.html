@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Your AI ops team</title>
+<meta name="description" content="The AI agent team that built — and now operates — your website. You never have to worry about it; talk to the team only when you wish."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet"/>
+<style>
+/* OpsAgents Agents Dashboard Design System — tokens (condensed from tokens/*.css) */
+:root{
+  --brand-orange:#F05E22;--brand-orange-dark:#D94E15;--brand-orange-soft:#FDEBE2;--brand-charcoal:#2B2D33;
+  --brand-gradient:linear-gradient(135deg,#F05E22 0%,#D94E15 100%);
+  --canvas:#F4F5FA;--canvas-tint:#EEF0F8;--surface:#FFFFFF;--surface-sunken:#F1F2F8;
+  --border:#E4E7F1;--border-faint:#EEF0F6;
+  --ink:#1E2138;--ink-2:#4A4F6B;--ink-3:#7A809B;
+  --status-healthy:#00C875;--status-healthy-soft:#E1F7EC;--status-healthy-ink:#00855A;
+  --status-working:#FDAB3D;--status-working-soft:#FFF1DC;--status-working-ink:#A9690A;
+  --status-stuck:#E2445C;--status-stuck-soft:#FCE3E7;--status-stuck-ink:#C12B43;
+  --status-idle:#C4C7D4;--status-idle-soft:#EDEEF3;--status-idle-ink:#6E7390;
+  --agent-violet:#6C5CE7;--agent-blue:#0073EA;--agent-sky:#00B2FF;--agent-teal:#00C7B5;
+  --agent-green:#00C875;--agent-lime:#7CC419;--agent-amber:#FDAB3D;--agent-orange:#FF7235;
+  --agent-coral:#E2445C;--agent-pink:#F857C1;--agent-purple:#B14DF0;--agent-grape:#784BD1;
+  --font-display:'Rubik',system-ui,sans-serif;--font-body:'Rubik',system-ui,sans-serif;
+  --font-mono:ui-monospace,'SF Mono','Menlo',monospace;
+  --radius-sm:10px;--radius-md:14px;--radius-lg:16px;--radius-2xl:24px;--radius-pill:999px;
+  --shadow-card:0 4px 14px rgba(20,22,40,.08);--shadow-lift:0 10px 26px rgba(20,22,40,.13);--shadow-pop:0 18px 44px rgba(20,22,40,.20);
+}
+[dir="rtl"]{--font-display:'Heebo','Rubik',system-ui,sans-serif;--font-body:'Heebo','Rubik',system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+.wrap{max-width:1180px;margin-inline:auto;padding:24px 22px 64px}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+.logo{display:flex;align-items:center;gap:10px;font:800 18px/1 var(--font-display)}
+.logo .mk{width:34px;height:34px;border-radius:11px;background:var(--brand-gradient);display:grid;place-items:center;color:#fff;font-size:16px;box-shadow:0 5px 14px rgba(240,94,34,.32)}
+.lang{margin-inline-start:auto;display:inline-flex;gap:3px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);padding:3px}
+.lang button{min-height:32px;padding:0 14px;border:0;border-radius:var(--radius-pill);font:700 12.5px var(--font-body);background:transparent;color:var(--ink-3);cursor:pointer}
+.lang button[aria-pressed="true"]{background:var(--brand-charcoal);color:#fff}
+
+/* ===== ORCHESTRATOR HERO — the focal point ===== */
+.theo{position:relative;display:grid;grid-template-columns:1.25fr .75fr;gap:26px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);box-shadow:var(--shadow-pop);padding:30px;overflow:hidden;margin-bottom:18px}
+.theo::before{content:'';position:absolute;inset-inline-start:0;inset-block:0;width:6px;background:var(--brand-gradient)}
+@media(max-width:880px){.theo{grid-template-columns:1fr}}
+.theo-head{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+.theo-av{width:64px;height:64px;border-radius:20px;display:grid;place-items:center;font-size:32px;background:var(--brand-orange-soft);box-shadow:inset 0 0 0 2.5px rgba(240,94,34,.45)}
+.theo-name{font:800 24px/1.1 var(--font-display);letter-spacing:-.02em;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.theo-role{font-size:14px;color:var(--ink-3);margin-top:2px}
+.live-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--status-healthy-ink);background:var(--status-healthy-soft);padding:3px 8px;border-radius:var(--radius-pill)}
+.live-tag i{width:5px;height:5px;border-radius:50%;background:var(--status-healthy);animation:blink 1.4s infinite}
+@keyframes blink{50%{opacity:.3}}
+.theo-say{font-size:16.5px;color:var(--ink-2);line-height:1.65;margin-bottom:18px;max-width:58ch}
+.theo-say b{color:var(--ink)}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
+.stat{display:flex;align-items:baseline;gap:7px;background:var(--surface-sunken);border-radius:var(--radius-md);padding:9px 14px}
+.stat b{font:800 17px/1 var(--font-display);color:var(--brand-orange)}
+.stat span{font-size:12.5px;color:var(--ink-3)}
+/* ask the team */
+.ask{background:var(--canvas-tint);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px}
+.ask label{display:block;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:9px}
+.ask .row{display:flex;gap:9px}
+.ask input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font:inherit;font-size:14.5px;padding:11px 14px;color:var(--ink);outline:none}
+.ask input:focus{border-color:var(--brand-orange);box-shadow:0 0 0 3px rgba(240,94,34,.18)}
+.ask button{min-height:42px;padding:0 18px;border:0;border-radius:var(--radius-sm);background:var(--brand-gradient);color:#fff;font:700 14px var(--font-body);cursor:pointer}
+.ask button:disabled{opacity:.6;cursor:wait}
+.ask .hint{font-size:12px;color:var(--ink-3);margin-top:8px}
+.ask .reply{display:none;margin-top:12px;background:var(--surface);border:1px solid var(--border);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:13px 15px;font-size:14px;color:var(--ink-2);line-height:1.6;max-height:220px;overflow:auto;white-space:pre-wrap}
+/* site preview side */
+.site-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.site-chip{display:flex;align-items:center;gap:9px;background:var(--status-healthy-soft);border:1px solid color-mix(in srgb,var(--status-healthy) 35%,transparent);border-radius:var(--radius-md);padding:11px 15px;font-size:13.5px;font-weight:600;color:var(--status-healthy-ink);flex-wrap:wrap}
+.site-chip a{color:var(--status-healthy-ink);font-family:var(--font-mono);font-size:12.5px;text-decoration:underline;word-break:break-all}
+.shot{position:relative;flex:1;min-height:240px;border-radius:var(--radius-lg);border:1px solid var(--border);overflow:hidden;background:var(--surface-sunken)}
+.shot iframe{width:200%;height:200%;transform:scale(.5);transform-origin:0 0;border:0;pointer-events:none}
+.shot .open{position:absolute;inset-inline-end:10px;bottom:10px;background:var(--brand-charcoal);color:#fff;font-size:12px;font-weight:700;padding:7px 13px;border-radius:var(--radius-pill);text-decoration:none}
+.shot.empty{display:grid;place-items:center;color:var(--ink-3);font-size:14px;text-align:center;padding:20px}
+
+/* ===== needs-you strip (only interaction the client ever needs) ===== */
+.needs{display:none;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-inline-start:5px solid var(--status-stuck);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:15px 18px;margin-bottom:26px;flex-wrap:wrap}
+.needs .n-ic{font-size:20px}
+.needs .n-tx{flex:1;min-width:220px;font-size:14.5px;color:var(--ink-2)}
+.needs .n-tx b{color:var(--ink)}
+.needs button{min-height:38px;padding:0 16px;border-radius:var(--radius-sm);font:700 13.5px var(--font-body);cursor:pointer}
+.needs .later{color:var(--ink-2);background:var(--surface-sunken);border:1px solid var(--border)}
+.needs .ok{color:#fff;background:var(--brand-gradient);border:0}
+
+/* ===== quiet team grid ===== */
+.team-h{display:flex;align-items:baseline;gap:12px;margin:6px 0 16px}
+.team-h h2{font:800 19px/1.2 var(--font-display)}
+.team-h span{font-size:13px;color:var(--ink-3)}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(252px,1fr))}
+.card{position:relative;display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;padding-inline-start:19px;box-shadow:var(--shadow-card);overflow:hidden;transition:box-shadow .18s,transform .18s}
+.card:hover{box-shadow:var(--shadow-lift);transform:translateY(-2px)}
+.card .bar{position:absolute;inset-block:0;inset-inline-start:0;width:5px;background:var(--hue)}
+.card header{display:flex;align-items:center;gap:11px}
+.av{width:42px;height:42px;flex:0 0 42px;border-radius:13px;display:grid;place-items:center;font-size:21px;background:color-mix(in srgb,var(--hue) 12%,white);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--hue) 42%,transparent)}
+.nm{font:700 15.5px/1.1 var(--font-display);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.rl{font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.meta{min-width:0;flex:1}
+.pill{font-size:10.5px;font-weight:700;letter-spacing:.04em;border-radius:var(--radius-pill);padding:4px 10px;flex:0 0 auto;text-transform:uppercase}
+.pill.healthy{background:var(--status-healthy-soft);color:var(--status-healthy-ink)}
+.pill.working{background:var(--status-working-soft);color:var(--status-working-ink);animation:blink 1.5s infinite}
+.pill.stuck{background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
+.pill.idle{background:var(--status-idle-soft);color:var(--status-idle-ink)}
+.last{font-size:13px;color:var(--ink-2);line-height:1.4}
+.sample{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;font-weight:700;opacity:.7}
+.foot{margin-top:36px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
+.back{display:inline-flex;align-items:center;gap:8px;margin-top:8px;color:var(--brand-orange);font-weight:700;font-size:14px;text-decoration:none}
+.back:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="top">
+    <div class="logo"><span class="mk">⚡</span> <span data-t="brand"></span></div>
+    <div class="lang" role="group" aria-label="Language">
+      <button id="lang-en" aria-pressed="true">EN</button>
+      <button id="lang-he" aria-pressed="false">עב</button>
+    </div>
+  </div>
+
+  <!-- Theo — the orchestrator, focal point -->
+  <section class="theo" aria-labelledby="theo-name">
+    <div>
+      <div class="theo-head">
+        <span class="theo-av" aria-hidden="true">🏛️</span>
+        <div>
+          <div class="theo-name" id="theo-name"><span data-t="theoName"></span> <span class="live-tag"><i></i>LIVE</span></div>
+          <div class="theo-role" data-t="theoRole"></div>
+        </div>
+      </div>
+      <p class="theo-say" id="theo-say"></p>
+      <div class="stats" id="stats"></div>
+      <div class="ask">
+        <label for="ask-in" data-t="askLabel"></label>
+        <div class="row">
+          <input id="ask-in" maxlength="300"/>
+          <button id="ask-go" data-t="askBtn"></button>
+        </div>
+        <div class="hint" data-t="askHint"></div>
+        <div class="reply" id="ask-reply"></div>
+      </div>
+    </div>
+    <div class="site-side">
+      <div class="site-chip" id="site-chip" style="display:none">✅ <b id="site-name"></b> <span data-t="isLive"></span> <a id="site-link" target="_blank" rel="noopener"></a></div>
+      <div class="shot empty" id="shot"><span data-t="noSite"></span></div>
+    </div>
+  </section>
+
+  <!-- the only thing that ever needs the client -->
+  <div class="needs" id="needs">
+    <span class="n-ic">✋</span>
+    <span class="n-tx" id="needs-tx"></span>
+    <button class="later" id="needs-later"></button>
+    <button class="ok" id="needs-ok"></button>
+  </div>
+
+  <div class="team-h"><h2 data-t="teamTitle"></h2><span data-t="teamSub"></span></div>
+  <div class="grid" id="grid"></div>
+
+  <p class="foot">
+    <span data-t="footLine"></span><br/>
+    <a class="back" href="/" data-t="back"></a>
+  </p>
+</div>
+<script src="/board/board.js"></script>
+</body>
+</html>

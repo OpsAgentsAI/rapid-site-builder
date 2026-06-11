@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "site": "rapid-site-builder",
+    "public": "web",
+    "ignore": ["**/.*"],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": { "serviceId": "rapid-builder-proxy", "region": "us-central1" }
+      }
+    ]
+  }
+}
