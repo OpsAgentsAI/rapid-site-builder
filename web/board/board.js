@@ -172,8 +172,19 @@
     }
   }
 
+  function renderMySites() {
+    let mine = [];
+    try { mine = JSON.parse(localStorage.getItem('my_sites') || '[]'); } catch { /* noop */ }
+    if (!mine.length) return;
+    $('mysites').style.display = 'block';
+    $('mysites-list').innerHTML = mine.slice(0, 12).map(s =>
+      `<a href="${esc(s.url)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;font-size:13px;font-weight:600;color:var(--ink-2);text-decoration:none">${esc(s.business || s.id)}<span style="font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)">/${esc(s.id)}</span></a>`
+    ).join('');
+  }
+
   $('ask-go').addEventListener('click', ask);
   $('ask-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
   renderTheo();
   renderTeam();
+  renderMySites();
 })();

@@ -493,6 +493,12 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         lastByAgent, feedByAgent, seoScore,
         at: Date.now()
       }));
+      // remember this device's published sites (account sign-in is the next milestone)
+      try {
+        const mine = JSON.parse(localStorage.getItem('my_sites') || '[]');
+        mine.unshift({ id: j.id, url: j.url, business: lastBuild.spec.business, at: Date.now() });
+        localStorage.setItem('my_sites', JSON.stringify(mine.slice(0, 20)));
+      } catch { /* storage unavailable — non-fatal */ }
     } catch (e) {
       $('err').textContent = (e.message || e);
       $('err').style.display = 'block';
