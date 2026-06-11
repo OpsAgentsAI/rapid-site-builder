@@ -105,8 +105,8 @@ app.post('/api/publish', async (req, res) => {
     const html = render(spec, { heroImage }); // always server-rendered — never client HTML
     const id = await saveSite(html, { business: String(spec.business).slice(0, 120) });
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
-    const base = `${proto}://${req.get('host')}`;
-    res.json({ id, url: `${base}/sites/${id}` });
+    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+    res.json({ id, url: `${proto}://${host}/sites/${id}` });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
   }
@@ -136,7 +136,7 @@ app.post('/api/ask', async (req, res) => {
       'The client just sent you this request. Reply DIRECTLY to the client in 2-4 warm, plain-language sentences: ' +
       'say which of your agents (Leo layout, Noa copy, Sam SEO, Vera monitoring, Gil security, Uri updates) you would route it to and what will happen next. ' +
       'Do not call any tools, do not transfer to another agent, do not publish anything — just answer the client.' +
-      (he ? ' Reply in Hebrew.' : '') +
+      (he ? ' Reply in Hebrew.' : ' Reply in English only.') +
       '\n\nClient request: ' + msg;
     const reply = await engine.oneTurn(prompt);
     res.json({ reply: reply.slice(0, 1200) });
