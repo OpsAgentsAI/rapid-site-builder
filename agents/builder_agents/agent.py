@@ -25,11 +25,28 @@ import sys
 
 # Gemini 3 preview models are served from the GLOBAL Vertex endpoint only.
 # GOOGLE_CLOUD_LOCATION is reserved in Agent Engine env_vars (the runtime
-# injects its own region), so when BUILDER_USE_GLOBAL=1 we override the
-# process env here at import time — before the ADK builds its genai client —
-# which routes model calls to the global endpoint.
+# injects its own region) and the env override alone proved insufficient —
+# the ADK's genai client still bound the regional location. When
+# BUILDER_USE_GLOBAL=1 we therefore patch genai Client construction itself:
+# every client the ADK builds gets location="global", regardless of how or
+# when it imports the class. Model calls route global; the engine's control
+# plane stays regional (managed by Vertex, unaffected).
 if os.environ.get("BUILDER_USE_GLOBAL") == "1":
     os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+    try:
+        from google.genai import client as _genai_client_mod
+
+        _orig_client_init = _genai_client_mod.Client.__init__
+
+        def _global_client_init(self, *args, **kwargs):
+            kwargs["location"] = "global"
+            _orig_client_init(self, *args, **kwargs)
+
+        _genai_client_mod.Client.__init__ = _global_client_init
+        print("builder_agents: genai Client patched to location=global", file=sys.stderr)
+    except Exception as _patch_exc:  # pragma: no cover
+        print("WARNING: global-client patch failed (%r); Gemini 3 routing may fail."
+              % _patch_exc, file=sys.stderr)
 
 from google.adk.agents import Agent
 
