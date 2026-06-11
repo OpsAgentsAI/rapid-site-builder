@@ -18,7 +18,7 @@ const express = require('express');
 const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
-const { heroImageUrl, normCategory, normStyle, CATEGORIES } = require('./lib/images');
+const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
 const { saveSite, loadSite } = require('./lib/store');
 
 const app = express();
@@ -71,9 +71,12 @@ function englishOnly(text) {
 
 function cleanBrief(body) {
   const s = (v, n) => String(v == null ? '' : v).slice(0, n).trim();
+  // "other" passes through to the crew untouched — classifying the business is
+  // the research agent's job; only the image cache needs a concrete category.
+  const rawCat = String(body.category || '').toLowerCase().trim();
   const brief = {
     business: s(body.business, 120),
-    category: normCategory(body.category),
+    category: rawCat === 'other' ? 'other' : normCategory(body.category),
     description: s(body.description, 400),
     lang: body.lang === 'he' ? 'he' : 'en',
     style: normStyle(body.style)
@@ -101,7 +104,10 @@ app.post('/api/build', async (req, res) => {
 
   // Hero image resolves in parallel with the crew run — a cache hit lands in
   // milliseconds; a miss generates without ever blocking the build.
-  let heroPromise = heroImageUrl(brief.category, brief.style).catch(() => null);
+  const imageCategory = brief.category === 'other'
+    ? inferCategory(brief.business + ' ' + brief.description)
+    : brief.category;
+  let heroPromise = heroImageUrl(imageCategory, brief.style).catch(() => null);
   heroPromise.then(url => { if (url) send({ type: 'image', url }); });
 
   try {
