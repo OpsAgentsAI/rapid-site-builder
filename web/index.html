@@ -6,123 +6,142 @@
 <title>Rapid Site Builder — your AI web team, live</title>
 <meta name="description" content="Describe your business in one line. A Google Cloud agent team designs, writes, and ships your website in front of you — free."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <style>
+/* OpsAgents Agents Dashboard Design System — tokens (condensed) */
 :root{
-  --bg:#0A0C14;--bg2:#0F1320;--panel:#131829;--panel2:#181F33;--line:#232C47;
-  --ink:#F0F4FF;--dim:#8B97B8;--mono:'JetBrains Mono',monospace;
-  --grad:linear-gradient(135deg,#7C5CFF,#2DD4BF);
-  --g-green:#22C55E;--g-amber:#F59E0B;--g-violet:#7C5CFF;--g-teal:#2DD4BF;--g-pink:#EC4899;--g-blue:#3B82F6;--g-red:#EF4444;
+  --brand-orange:#F05E22;--brand-orange-dark:#D94E15;--brand-orange-hover:#E65316;--brand-orange-soft:#FDEBE2;
+  --brand-orange-ring:rgba(240,94,34,.32);--brand-charcoal:#2B2D33;
+  --brand-gradient:linear-gradient(135deg,#F05E22 0%,#D94E15 100%);
+  --canvas:#F4F5FA;--canvas-tint:#EEF0F8;--surface:#FFFFFF;--surface-hover:#F8F9FD;--surface-sunken:#F1F2F8;
+  --border:#E4E7F1;--border-strong:#D2D7E5;--border-faint:#EEF0F6;
+  --ink:#1E2138;--ink-2:#4A4F6B;--ink-3:#7A809B;--ink-4:#A4A9C0;
+  --status-healthy:#00C875;--status-healthy-soft:#E1F7EC;--status-healthy-ink:#00855A;
+  --status-working:#FDAB3D;--status-working-soft:#FFF1DC;--status-working-ink:#A9690A;
+  --status-stuck:#E2445C;--status-stuck-soft:#FCE3E7;--status-stuck-ink:#C12B43;
+  --status-idle:#C4C7D4;--status-idle-soft:#EDEEF3;--status-idle-ink:#6E7390;
+  --agent-violet:#6C5CE7;--agent-blue:#0073EA;--agent-sky:#00B2FF;--agent-teal:#00C7B5;
+  --agent-green:#00C875;--agent-lime:#7CC419;--agent-amber:#FDAB3D;--agent-orange:#FF7235;
+  --agent-coral:#E2445C;--agent-pink:#F857C1;--agent-purple:#B14DF0;--agent-grape:#784BD1;
+  --font-display:'Rubik',system-ui,sans-serif;--font-body:'Rubik',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'Menlo',monospace;
+  --radius-sm:10px;--radius-md:14px;--radius-lg:16px;--radius-xl:18px;--radius-2xl:24px;--radius-pill:999px;
+  --shadow-sm:0 2px 6px rgba(20,22,40,.07);--shadow-card:0 4px 14px rgba(20,22,40,.08);
+  --shadow-lift:0 10px 26px rgba(20,22,40,.13);--shadow-pop:0 18px 44px rgba(20,22,40,.20);
+  --ease-out:cubic-bezier(.22,.61,.36,1);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
-body::before{content:'';position:fixed;inset:0;background:radial-gradient(60% 50% at 20% 0%,rgba(124,92,255,.13),transparent 60%),radial-gradient(50% 40% at 85% 10%,rgba(45,212,191,.10),transparent 55%);pointer-events:none}
-h1,h2,h3{font-family:'Sora',sans-serif;line-height:1.12;letter-spacing:-.02em}
+body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
+h1,h2,h3{font-family:var(--font-display);letter-spacing:-.02em;line-height:1.15}
 .wrap{max-width:1180px;margin-inline:auto;padding-inline:24px;position:relative}
-header{padding:22px 0}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.logo{display:flex;align-items:center;gap:12px;font-family:'Sora',sans-serif;font-weight:800;font-size:19px}
-.logo .mk{width:38px;height:38px;border-radius:12px;background:var(--grad);display:grid;place-items:center;font-size:18px}
+header.top{background:var(--surface);border-bottom:1px solid var(--border)}
+.head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
+.wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
+.wordmark .br{color:var(--brand-orange);font-weight:700}
+.wordmark .ai{font-size:11px;font-weight:700;color:#fff;background:var(--brand-gradient);padding:2px 8px;border-radius:var(--radius-pill);letter-spacing:0}
 .badges{display:flex;gap:8px;flex-wrap:wrap}
-.badge{font-size:12px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.02)}
+.badge{font-size:12.5px;font-weight:600;color:var(--ink-2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;background:var(--surface)}
 .badge b{color:var(--ink)}
 /* ---------- intake ---------- */
-#intake{padding:44px 0 26px;text-align:center}
-#intake h1{font-size:clamp(34px,5.4vw,58px);max-width:21ch;margin:0 auto 14px;text-wrap:balance}
-#intake h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-#intake .sub{color:var(--dim);font-size:clamp(16px,2vw,18.5px);max-width:60ch;margin:0 auto 36px}
-.formcard{max-width:780px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:30px;text-align:start;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+#intake{padding:52px 0 64px;text-align:center}
+#intake h1{font-size:clamp(32px,5vw,52px);max-width:22ch;margin:0 auto 14px;text-wrap:balance;color:var(--brand-charcoal)}
+#intake h1 em{font-style:normal;color:var(--brand-orange)}
+#intake .sub{color:var(--ink-2);font-size:clamp(15.5px,2vw,17.5px);max-width:62ch;margin:0 auto 36px}
+.formcard{max-width:780px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:30px;text-align:start;box-shadow:var(--shadow-pop)}
 .frow{display:grid;grid-template-columns:1.2fr .9fr;gap:14px;margin-bottom:14px}
 .frow.three{grid-template-columns:1fr .55fr .55fr}
 @media(max-width:640px){.frow,.frow.three{grid-template-columns:1fr}}
-label{display:block;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
-input,select,textarea{width:100%;background:var(--bg2);border:1px solid var(--line);border-radius:13px;color:var(--ink);font:inherit;font-size:15.5px;padding:13px 15px;outline:none;transition:border-color .15s}
-input:focus,select:focus,textarea:focus{border-color:#7C5CFF}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 18px}
-.chip{font-size:13px;color:var(--dim);border:1px solid var(--line);background:transparent;border-radius:999px;padding:7px 13px;cursor:pointer;transition:all .15s}
-.chip:hover{color:var(--ink);border-color:#7C5CFF}
-.go{width:100%;border:0;border-radius:14px;background:var(--grad);color:#fff;font:700 17px 'Sora',sans-serif;padding:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:transform .15s,box-shadow .15s}
-.go:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(124,92,255,.35)}
+label{display:block;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+input,select{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);color:var(--ink);font:inherit;font-size:15px;padding:12px 14px;outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus{border-color:var(--brand-orange);box-shadow:0 0 0 3px var(--brand-orange-ring)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 18px}
+.chip{font-size:13px;font-weight:500;color:var(--ink-2);border:1px solid var(--border);background:var(--surface-sunken);border-radius:var(--radius-pill);padding:8px 14px;cursor:pointer;transition:all .15s;font-family:var(--font-body)}
+.chip:hover{color:var(--brand-orange);border-color:var(--brand-orange);background:var(--brand-orange-soft)}
+.go{width:100%;border:0;border-radius:var(--radius-md);background:var(--brand-gradient);color:#fff;font:700 16.5px var(--font-display);padding:16px;cursor:pointer;transition:transform .15s,box-shadow .15s;box-shadow:var(--shadow-sm)}
+.go:hover{transform:translateY(-2px);box-shadow:0 14px 30px var(--brand-orange-ring)}
 .go:disabled{opacity:.55;cursor:wait;transform:none;box-shadow:none}
-.free{color:var(--dim);font-size:13px;text-align:center;margin-top:12px}
+.free{color:var(--ink-3);font-size:13px;text-align:center;margin-top:12px}
 /* ---------- the show ---------- */
-#show{display:none;padding:30px 0 60px}
-.show-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:22px}
-.show-head h2{font-size:clamp(22px,3vw,30px)}
-.show-head .who{color:var(--dim);font-size:14.5px}
-.phases{display:flex;gap:8px;margin-bottom:26px;flex-wrap:wrap}
-.phase{flex:1;min-width:130px;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);background:var(--panel);display:flex;align-items:center;gap:9px;transition:all .25s}
-.phase .dot{width:9px;height:9px;border-radius:50%;background:var(--line);flex:0 0 9px}
-.phase.active{color:var(--ink);border-color:#7C5CFF;background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(45,212,191,.08))}
-.phase.active .dot{background:var(--g-violet);animation:pulse 1.1s infinite}
-.phase.done{color:var(--ink)}
-.phase.done .dot{background:var(--g-green)}
+#show{display:none;padding:34px 0 60px}
+.show-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+.show-head h2{font-size:clamp(22px,3vw,28px);color:var(--brand-charcoal)}
+.show-head .who{color:var(--ink-3);font-size:14px}
+.phases{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap}
+.phase{flex:1;min-width:140px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;font-weight:600;color:var(--ink-3);background:var(--surface);display:flex;align-items:center;gap:9px;transition:all .25s;box-shadow:var(--shadow-sm)}
+.phase .dot{width:9px;height:9px;border-radius:50%;background:var(--status-idle);flex:0 0 9px}
+.phase.active{color:var(--ink);border-color:var(--brand-orange);background:var(--brand-orange-soft)}
+.phase.active .dot{background:var(--brand-orange);animation:pulse 1.1s infinite}
+.phase.done{color:var(--ink-2)}
+.phase.done .dot{background:var(--status-healthy)}
 @keyframes pulse{50%{opacity:.35}}
-.stage{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start}
+.stage{display:grid;grid-template-columns:390px 1fr;gap:20px;align-items:start}
 @media(max-width:960px){.stage{grid-template-columns:1fr}}
-/* crew lanes */
+/* crew cards — design-system AgentCard */
 .crew{display:flex;flex-direction:column;gap:12px}
-.agent{display:flex;gap:14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:15px 17px;transition:all .25s;border-inline-start:4px solid var(--line)}
-.agent .av{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:23px;background:var(--bg2);flex:0 0 46px}
-.agent .nm{font-weight:700;font-size:15.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.agent .rl{color:var(--dim);font-size:12.5px;margin-top:1px}
-.agent .last{color:var(--dim);font-size:12.5px;margin-top:6px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.agent{position:relative;display:flex;gap:13px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;padding-inline-start:18px;transition:all .25s var(--ease-out);box-shadow:var(--shadow-card);overflow:hidden}
+.agent .bar{position:absolute;inset-block:0;inset-inline-start:0;width:5px;background:var(--hue)}
+.av{position:relative;width:48px;height:48px;flex:0 0 48px}
+.av .face{width:100%;height:100%;border-radius:var(--radius-md);background:color-mix(in srgb,var(--hue) 14%,white);box-shadow:inset 0 0 0 2px var(--hue);overflow:hidden;display:block}
+.av .face img{width:100%;height:100%;display:block}
+.av .role-badge{position:absolute;inset-inline-end:-4px;bottom:-4px;width:20px;height:20px;border-radius:7px;background:var(--surface);box-shadow:var(--shadow-sm);display:grid;place-items:center;font-size:11px}
+.av.bob{animation:bob 1.6s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-3px)}}
+.agent .nm{font-weight:700;font-size:15.5px;font-family:var(--font-display);color:var(--ink)}
+.agent .rl{color:var(--ink-3);font-size:12.5px;margin-top:1px}
+.agent .last{color:var(--ink-3);font-size:12px;margin-top:5px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:235px}
 .agent .meta{min-width:0;flex:1}
-.pill{margin-inline-start:auto;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:999px;padding:5px 11px;flex:0 0 auto}
-.pill.q{background:rgba(139,151,184,.12);color:var(--dim)}
-.pill.w{background:rgba(245,158,11,.16);color:#FBBF24;animation:pulse 1.2s infinite}
-.pill.d{background:rgba(34,197,94,.16);color:#4ADE80}
-.agent.working{border-inline-start-color:var(--g-amber);box-shadow:0 0 0 1px rgba(245,158,11,.25),0 14px 34px rgba(0,0,0,.35);transform:translateX(4px)}
-.agent.done{border-inline-start-color:var(--g-green)}
-.agent[data-a="brief"] .av{background:rgba(59,130,246,.12)}
-.agent[data-a="leo"] .av{background:rgba(236,72,153,.12)}
-.agent[data-a="noa"] .av{background:rgba(245,158,11,.12)}
-.agent[data-a="sam"] .av{background:rgba(34,197,94,.12)}
-.agent[data-a="phoenix"] .av{background:rgba(124,92,255,.14)}
-.agent[data-a="max"] .av{background:rgba(45,212,191,.12)}
+.pill{margin-inline-start:auto;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:var(--radius-pill);padding:5px 11px;flex:0 0 auto}
+.pill.q{background:var(--status-idle-soft);color:var(--status-idle-ink)}
+.pill.w{background:var(--status-working-soft);color:var(--status-working-ink);animation:pulse 1.2s infinite}
+.pill.d{background:var(--status-healthy-soft);color:var(--status-healthy-ink)}
+.agent.working{box-shadow:0 0 0 2px var(--status-working),var(--shadow-lift);transform:translateX(4px)}
+.agent.done .bar{background:var(--status-healthy)}
 /* console + preview column */
-.main-col{display:flex;flex-direction:column;gap:20px;min-width:0}
-.console{background:#0B0F1B;border:1px solid var(--line);border-radius:18px;overflow:hidden}
-.console .bar{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--dim);font-weight:600}
+.main-col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.console{background:var(--brand-charcoal);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-card)}
+.console .bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.09);font-size:12.5px;color:rgba(255,255,255,.65);font-weight:600;font-family:var(--font-display)}
 .console .bar .lights{display:flex;gap:6px}
 .console .bar .lights i{width:10px;height:10px;border-radius:50%;display:block}
-.console .body{height:300px;overflow-y:auto;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.75}
+.console .body{height:300px;overflow-y:auto;padding:14px 16px;font-family:var(--font-mono);font-size:12.5px;line-height:1.75;color:#D9DEED}
 .cline{margin-bottom:7px;word-break:break-word;animation:fadein .25s ease}
 @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1}}
 .cline .who{font-weight:600;border-radius:6px;padding:1px 7px;margin-inline-end:8px;font-size:11px}
-.arize-banner{display:none;align-items:center;gap:12px;background:linear-gradient(135deg,rgba(124,92,255,.16),rgba(45,212,191,.10));border:1px solid rgba(124,92,255,.45);border-radius:16px;padding:14px 18px;font-size:14.5px}
-.arize-banner b{color:#B7A6FF}
+.arize-banner{display:none;align-items:center;gap:12px;background:color-mix(in srgb,var(--agent-purple) 9%,white);border:1px solid color-mix(in srgb,var(--agent-purple) 38%,transparent);border-inline-start:5px solid var(--agent-purple);border-radius:var(--radius-lg);padding:13px 17px;font-size:14px;color:var(--ink-2);box-shadow:var(--shadow-sm)}
+.arize-banner b{color:var(--agent-purple)}
+.arize-banner .mini{width:34px;height:34px;flex:0 0 34px;border-radius:11px;background:color-mix(in srgb,var(--agent-purple) 14%,white);box-shadow:inset 0 0 0 2px var(--agent-purple);overflow:hidden}
+.arize-banner .mini img{width:100%;height:100%;display:block}
 /* preview */
-.preview{display:none;background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;animation:fadein .4s ease}
-.preview .pbar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.preview{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;animation:fadein .4s ease;box-shadow:var(--shadow-card)}
+.preview .pbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface-sunken)}
 .preview .pbar .lights{display:flex;gap:6px}
 .preview .pbar .lights i{width:11px;height:11px;border-radius:50%;display:block}
-.preview .url{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:9px;font-family:var(--mono);font-size:12px;color:var(--dim);padding:7px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.preview .url{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);font-family:var(--font-mono);font-size:12px;color:var(--ink-3);padding:7px 14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .preview iframe{width:100%;height:640px;border:0;background:#fff}
 .actions{display:none;gap:12px;flex-wrap:wrap;align-items:center}
-.btn{display:inline-flex;align-items:center;gap:9px;border:0;border-radius:13px;padding:15px 26px;font:700 15.5px 'Sora',sans-serif;cursor:pointer;transition:transform .15s,box-shadow .15s}
-.btn.primary{background:var(--grad);color:#fff}
-.btn.primary:hover{transform:translateY(-2px);box-shadow:0 16px 36px rgba(124,92,255,.35)}
-.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-.btn.ghost:hover{border-color:#7C5CFF}
-.live-url{display:none;align-items:center;gap:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.35);border-radius:13px;padding:12px 16px;font-family:var(--mono);font-size:13.5px;flex-wrap:wrap}
-.live-url a{color:#4ADE80;text-decoration:underline}
-.err{display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:15px 18px;font-size:14.5px;color:#FCA5A5}
-footer{padding:36px 0 28px;color:var(--dim);font-size:13px;text-align:center}
-footer b{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;gap:9px;border:0;border-radius:var(--radius-md);padding:14px 26px;font:700 15px var(--font-display);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.btn.primary{background:var(--brand-gradient);color:#fff;box-shadow:var(--shadow-sm)}
+.btn.primary:hover{transform:translateY(-2px);box-shadow:0 14px 30px var(--brand-orange-ring)}
+.btn.ghost{background:var(--surface);color:var(--ink-2);border:1px solid var(--border-strong);text-decoration:none}
+.btn.ghost:hover{border-color:var(--brand-orange);color:var(--brand-orange)}
+.live-url{display:none;align-items:center;gap:10px;background:var(--status-healthy-soft);border:1px solid color-mix(in srgb,var(--status-healthy) 40%,transparent);border-radius:var(--radius-md);padding:12px 16px;font-family:var(--font-mono);font-size:13.5px;flex-wrap:wrap;color:var(--status-healthy-ink)}
+.live-url a{color:var(--status-healthy-ink);text-decoration:underline}
+.err{display:none;background:var(--status-stuck-soft);border:1px solid color-mix(in srgb,var(--status-stuck) 45%,transparent);border-radius:var(--radius-md);padding:14px 17px;font-size:14px;color:var(--status-stuck-ink)}
+footer.page{padding:36px 0 28px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
+footer.page b{color:var(--ink-2)}
+footer.page a{color:var(--brand-orange);text-decoration:none}
 </style>
 </head>
 <body>
+<header class="top"><div class="wrap head">
+  <a class="wordmark" href="/"><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
+  <div class="badges">
+    <span class="badge"><b>Google Cloud Agent Builder</b> · ADK</span>
+    <span class="badge"><b>Gemini</b> + image generation</span>
+    <span class="badge"><b>Arize Phoenix</b> MCP observability</span>
+  </div>
+</div></header>
 <div class="wrap">
-  <header><div class="head">
-    <div class="logo"><span class="mk">⚡</span> Rapid Site Builder</div>
-    <div class="badges">
-      <span class="badge">⚙️ <b>Google Cloud Agent Builder</b> (ADK)</span>
-      <span class="badge">✨ <b>Gemini</b> + Nano Banana images</span>
-      <span class="badge">🔭 <b>Arize Phoenix</b> MCP observability</span>
-    </div>
-  </div></header>
 
   <!-- ============ INTAKE ============ -->
   <section id="intake">
@@ -130,10 +149,10 @@ footer b{color:var(--ink)}
     <p class="sub">One line about your business. Five specialist agents — research, design, copy, SEO, observability — go to work live. Watch them ship your site. Free.</p>
     <div class="formcard">
       <div class="chips" id="chips">
-        <button class="chip" type="button">☕ Neighborhood specialty coffee bar in Tel Aviv</button>
-        <button class="chip" type="button">💪 Boutique pilates studio for busy parents</button>
-        <button class="chip" type="button">🏠 Family real-estate agency, 20 years in the Sharon</button>
-        <button class="chip" type="button">🧁 בית קפה שכונתי עם מאפים מהתנור</button>
+        <button class="chip" type="button">Neighborhood specialty coffee bar in Tel Aviv</button>
+        <button class="chip" type="button">Boutique pilates studio for busy parents</button>
+        <button class="chip" type="button">Family real-estate agency, 20 years in the Sharon</button>
+        <button class="chip" type="button">Cozy neighborhood bakery with a wood-fired oven</button>
       </div>
       <div class="frow">
         <div><label for="business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna"/></div>
@@ -152,16 +171,13 @@ footer b{color:var(--ink)}
           </select>
         </div>
       </div>
-      <div class="frow three">
+      <div class="frow">
         <div><label for="description">One line about it</label><input id="description" maxlength="400" placeholder="Specialty coffee roasted in-house, pastries from our own oven"/></div>
-        <div><label for="lang">Site language</label>
-          <select id="lang"><option value="en">English</option><option value="he">עברית</option></select>
-        </div>
         <div><label for="style">Vibe (optional)</label>
           <select id="style"><option value="default">Let the team pick</option><option value="warm">Warm</option><option value="fresh">Fresh</option><option value="modern">Modern</option><option value="trust">Trustworthy</option><option value="bold">Bold</option></select>
         </div>
       </div>
-      <button class="go" id="go">🚀 Build my site — watch the team work</button>
+      <button class="go" id="go">Build my site — watch the team work</button>
       <p class="free">Free · no signup · about two minutes</p>
     </div>
   </section>
@@ -179,36 +195,29 @@ footer b{color:var(--ink)}
       <div class="phase" data-p="3"><span class="dot"></span> Final assembly</div>
     </div>
     <div class="stage">
-      <div class="crew" id="crew">
-        <div class="agent" data-a="brief"><span class="av">🧭</span><div class="meta"><div class="nm">Brief</div><div class="rl">Business research</div><div class="last"></div></div><span class="pill q">queued</span></div>
-        <div class="agent" data-a="leo"><span class="av">🎨</span><div class="meta"><div class="nm">Leo</div><div class="rl">Layout &amp; art direction</div><div class="last"></div></div><span class="pill q">queued</span></div>
-        <div class="agent" data-a="noa"><span class="av">✍️</span><div class="meta"><div class="nm">Noa</div><div class="rl">Copywriter · EN/HE</div><div class="last"></div></div><span class="pill q">queued</span></div>
-        <div class="agent" data-a="sam"><span class="av">📈</span><div class="meta"><div class="nm">Sam</div><div class="rl">SEO</div><div class="last"></div></div><span class="pill q">queued</span></div>
-        <div class="agent" data-a="phoenix"><span class="av">🔭</span><div class="meta"><div class="nm">Phoenix</div><div class="rl">Observability · Arize MCP</div><div class="last"></div></div><span class="pill q">queued</span></div>
-        <div class="agent" data-a="max"><span class="av">🚀</span><div class="meta"><div class="nm">Max</div><div class="rl">Publisher · human-gated</div><div class="last"></div></div><span class="pill q">queued</span></div>
-      </div>
+      <div class="crew" id="crew"></div>
       <div class="main-col">
-        <div class="arize-banner" id="arize">🔭 <span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
+        <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
         <div class="console">
-          <div class="bar"><span class="lights"><i style="background:#EF4444"></i><i style="background:#F59E0B"></i><i style="background:#22C55E"></i></span> live agent feed · Vertex AI Agent Engine</div>
+          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> live agent feed · Vertex AI Agent Engine</div>
           <div class="body" id="feed"></div>
         </div>
         <div class="err" id="err"></div>
         <div class="preview" id="preview">
-          <div class="pbar"><span class="lights"><i style="background:#EF4444"></i><i style="background:#F59E0B"></i><i style="background:#22C55E"></i></span><span class="url" id="purl">preview — built by your agent team</span></div>
+          <div class="pbar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span><span class="url" id="purl">preview — built by your agent team</span></div>
           <iframe id="frame" sandbox title="Generated website preview"></iframe>
         </div>
         <div class="actions" id="actions">
-          <button class="btn primary" id="publish">🚀 Publish it — free</button>
-          <a class="btn ghost" id="board-link" href="/board">Meet your ops team →</a>
-          <button class="btn ghost" id="again">↺ Build another</button>
+          <button class="btn primary" id="publish">Publish it — free</button>
+          <a class="btn ghost" id="board-link" href="/board">Meet your ops team</a>
+          <button class="btn ghost" id="again">Build another</button>
         </div>
-        <div class="live-url" id="live">✅ Live: <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:8px 14px;font-size:13px">Copy</button></div>
+        <div class="live-url" id="live">Live: <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px">Copy</button></div>
       </div>
     </div>
   </section>
 
-  <footer>Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere. · <a href="/campfire" style="color:var(--dim)">🔥</a></footer>
+  <footer class="page">Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere. · <a href="/campfire">The campfire</a></footer>
 </div>
 
 <script>
@@ -218,15 +227,37 @@ footer b{color:var(--ink)}
   const RAW_API = '__API_BASE__';
   const API = RAW_API.startsWith('http') ? RAW_API : '';
   const $ = (id) => document.getElementById(id);
+
+  // Design-system characters: DiceBear Adventurer face on a hue ring, role
+  // emoji as a small corner badge (matches the kit's Avatar component).
+  const PERSONAS = [
+    { id: 'theo',    seed: 'Theo',    name: 'Theo',    role: 'Orchestrator',           emoji: '🏛️', hue: 'var(--agent-grape)' },
+    { id: 'brief',   seed: 'Aria',    name: 'Aria',    role: 'Business research',     emoji: '🔍', hue: 'var(--agent-violet)' },
+    { id: 'leo',     seed: 'Leo',     name: 'Leo',     role: 'Layout & art direction', emoji: '🎨', hue: 'var(--agent-blue)' },
+    { id: 'noa',     seed: 'Noa',     name: 'Noa',     role: 'Copywriter',             emoji: '✍️', hue: 'var(--agent-pink)' },
+    { id: 'sam',     seed: 'Sam',     name: 'Sam',     role: 'SEO',                    emoji: '📈', hue: 'var(--agent-green)' },
+    { id: 'phoenix', seed: 'Phoenix', name: 'Phoenix', role: 'Observability · Arize MCP', emoji: '🔭', hue: 'var(--agent-purple)' },
+    { id: 'max',     seed: 'Max',     name: 'Max',     role: 'Publisher · human-gated', emoji: '🚀', hue: 'var(--agent-orange)' }
+  ];
+  const face = (seed) => `https://api.dicebear.com/9.x/adventurer/svg?seed=${encodeURIComponent(seed)}&radius=18&backgroundType=solid&scale=96`;
+  $('crew').innerHTML = PERSONAS.map(p => `
+    <div class="agent" data-a="${p.id}" style="--hue:${p.hue}">
+      <span class="bar" aria-hidden="true"></span>
+      <span class="av"><span class="face"><img alt="" src="${face(p.seed)}"/></span><span class="role-badge" aria-hidden="true">${p.emoji}</span></span>
+      <div class="meta"><div class="nm">${p.name}</div><div class="rl">${p.role}</div><div class="last"></div></div>
+      <span class="pill q">queued</span>
+    </div>`).join('');
+
   const AGENT_MAP = [
     [/business_research|research/i, 'brief'],
     [/layout/i, 'leo'],
     [/copy/i, 'noa'],
     [/seo/i, 'sam'],
     [/observability|arize|phoenix/i, 'phoenix'],
-    [/publish/i, 'max']
+    [/publish/i, 'max'],
+    [/orchestrator/i, 'theo']
   ];
-  const COLORS = { brief:'#3B82F6', leo:'#EC4899', noa:'#F59E0B', sam:'#22C55E', phoenix:'#7C5CFF', max:'#2DD4BF', orchestrator:'#8B97B8' };
+  const COLORS = { theo:'#784BD1', brief:'#6C5CE7', leo:'#0073EA', noa:'#F857C1', sam:'#00C875', phoenix:'#B14DF0', max:'#FF7235', orchestrator:'#A4A9C0' };
   let lastBuild = null, agentsRan = new Set(), feedCount = 0;
   const lastByAgent = {};   // persona -> last meaningful action line (for the operate board)
   const feedByAgent = {};   // persona -> last 3 meaningful lines (operate-board activity feed)
@@ -234,10 +265,10 @@ footer b{color:var(--ink)}
 
   $('chips').addEventListener('click', (e) => {
     const b = e.target.closest('.chip'); if (!b) return;
-    const t = b.textContent.replace(/^[^ ]+ /, '').trim();
+    const t = b.textContent.trim();
     $('description').value = t;
-    if (/[֐-׿]/.test(t)) $('lang').value = 'he';
-    if (/coffee|קפה|cafe/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = /קפה/.test(t) ? 'קפה לונה' : 'Cafe Luna'; }
+    if (/coffee|cafe/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = 'Cafe Luna'; }
+    else if (/bakery/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = 'Ember & Crumb'; }
     else if (/pilates|studio/i.test(t)) { $('category').value = 'fitness'; if (!$('business').value) $('business').value = 'Studio Flow'; }
     else if (/real-?estate/i.test(t)) { $('category').value = 'real_estate'; if (!$('business').value) $('business').value = 'HaSharon Homes'; }
   });
@@ -250,7 +281,9 @@ footer b{color:var(--ink)}
     const el = document.querySelector(`.agent[data-a="${key}"]`); if (!el) return;
     el.classList.remove('working', 'done');
     const pill = el.querySelector('.pill');
-    if (state === 'w') { el.classList.add('working'); pill.className = 'pill w'; pill.textContent = 'working'; }
+    const av = el.querySelector('.av');
+    av.classList.remove('bob');
+    if (state === 'w') { el.classList.add('working'); av.classList.add('bob'); pill.className = 'pill w'; pill.textContent = 'working'; }
     if (state === 'd') { el.classList.add('done'); pill.className = 'pill d'; pill.textContent = 'done'; }
     if (lastText) el.querySelector('.last').textContent = lastText.slice(0, 90);
   }
@@ -271,8 +304,8 @@ footer b{color:var(--ink)}
     div.className = 'cline';
     const who = document.createElement('span');
     who.className = 'who';
-    who.style.background = (COLORS[key] || '#8B97B8') + '22';
-    who.style.color = COLORS[key] || '#8B97B8';
+    who.style.background = (COLORS[key] || '#A4A9C0') + '33';
+    who.style.color = COLORS[key] || '#A4A9C0';
     who.textContent = key === 'orchestrator' ? (author || 'team') : key;
     div.appendChild(who);
     div.appendChild(document.createTextNode(text.length > 700 ? text.slice(0, 700) + ' …' : text));
@@ -288,7 +321,6 @@ footer b{color:var(--ink)}
       p.classList.toggle('active', i === n);
       p.classList.toggle('done', i < n);
     });
-    // a new phase means the previous phase's workers are done
     if (n >= 1) ['brief', 'leo'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
     if (n >= 2) ['noa', 'sam'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
     if (n >= 3) agentsRan.has('phoenix') && setPill('phoenix', 'd');
@@ -299,7 +331,7 @@ footer b{color:var(--ink)}
       business: $('business').value.trim(),
       category: $('category').value,
       description: $('description').value.trim(),
-      lang: $('lang').value,
+      lang: 'en',
       style: $('style').value
     };
     if (!brief.business && !brief.description) { $('description').focus(); return; }
@@ -334,13 +366,12 @@ footer b{color:var(--ink)}
           let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
           if (ev.type === 'phase') phase(ev.n);
           else if (ev.type === 'step') feed(ev.agent, ev.text);
-          else if (ev.type === 'image') { heroImage = ev.url; feed('nano-banana', '🍌 hero image ready (cached Gemini art): ' + ev.url.split('/').slice(-3).join('/')); }
+          else if (ev.type === 'image') { heroImage = ev.url; feed('nano-banana', 'hero image ready (cached Gemini art): ' + ev.url.split('/').slice(-3).join('/')); }
           else if (ev.type === 'site') {
             lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
-            document.querySelectorAll('.phase').forEach(p => p.classList.add('done'));
-            document.querySelectorAll('.phase').forEach(p => p.classList.remove('active'));
-            ['brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
-            $('show-title').textContent = '✨ Your site is ready';
+            document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
+            ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
+            $('show-title').textContent = 'Your site is ready';
             $('frame').srcdoc = ev.html;
             $('purl').textContent = (ev.spec.business || 'your-site') + ' — built live by the crew';
             $('preview').style.display = 'block';
@@ -351,7 +382,7 @@ footer b{color:var(--ink)}
         }
       }
     } catch (e) {
-      $('err').textContent = '⚠️ ' + (e.message || e);
+      $('err').textContent = (e.message || e);
       $('err').style.display = 'block';
       $('actions').style.display = 'flex';
       $('publish').style.display = 'none';
@@ -373,11 +404,11 @@ footer b{color:var(--ink)}
       if (!r.ok) throw new Error(j.error || 'Publish failed');
       setPill('max', 'd', 'shipped ' + j.url);
       agentsRan.add('max');
+      lastByAgent.max = 'Shipped the site live: ' + j.url;
+      feedByAgent.max = ['render(spec) → single-file HTML', 'saved to site store', 'live at ' + j.url.replace(/^https?:\/\//, '')];
       $('live-a').textContent = j.url; $('live-a').href = j.url;
       $('live').style.display = 'flex';
       $('publish').style.display = 'none';
-      lastByAgent.max = 'Shipped the site live: ' + j.url;
-      feedByAgent.max = ['render(spec) → single-file HTML', 'saved to site store', 'live at ' + j.url.replace(/^https?:\/\//, '')];
       sessionStorage.setItem('operate_state', JSON.stringify({
         business: lastBuild.spec.business,
         lang: lastBuild.spec.lang === 'he' ? 'he' : 'en',
@@ -387,10 +418,10 @@ footer b{color:var(--ink)}
         at: Date.now()
       }));
     } catch (e) {
-      $('err').textContent = '⚠️ ' + (e.message || e);
+      $('err').textContent = (e.message || e);
       $('err').style.display = 'block';
       $('publish').disabled = false;
-      $('publish').textContent = '🚀 Publish it — free';
+      $('publish').textContent = 'Publish it — free';
     }
   }
 
