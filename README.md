@@ -1,11 +1,15 @@
 # ⚡ Rapid Site Builder
 
-**Describe your business in one line — an AI agent team designs, writes, and ships your website in front of you.**
+**Describe your business in one line — an AI agent team designs, writes, and ships your website in front of you. Then it stays to run it.**
 
-Built for the Google Cloud Rapid Agent Hackathon. Google-native end to end:
+**[⚡ Try it live — free](https://rapid-site-builder.web.app)** · **[🎥 56-second demo](https://www.youtube.com/watch?v=MhyCTNXyjHc)** · **[🏆 Devpost entry](https://devpost.com/software/rapid-site-builder-hire-your-ai-ops-team)**
+
+![Rapid Site Builder — one line in, a live website plus the AI team that runs it, out](web/og.png)
+
+Built for the Google Cloud Rapid Agent Hackathon (Arize track). Submitted state: tag [`devpost-submission`](../../releases/tag/devpost-submission); development continues on main. Google-native end to end:
 
 - **Google Cloud Agent Builder (ADK)** — a five-specialist crew orchestrated by `site_builder_orchestrator`, deployed on **Vertex AI Agent Engine**
-- **Gemini** for every agent turn, plus **Gemini image generation ("Nano Banana")** for hero photography (GCS-cached by business category)
+- **Gemini 3** for every agent turn (`gemini-3-flash-preview`, routed to the global Vertex endpoint from inside the pickled crew), plus **Nano Banana Pro (`gemini-3-pro-image-preview`)** for hero photography (GCS-cached by business category)
 - **Arize Phoenix MCP** (partner integration) — the observability agent records every build run through Phoenix's MCP server
 - No other AI anywhere.
 
