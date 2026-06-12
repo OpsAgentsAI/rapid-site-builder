@@ -2,7 +2,7 @@
 
 **Describe your business in one line — an AI agent team designs, writes, and ships your website in front of you. Then it stays to run it.**
 
-**[⚡ Try it live — free](https://rapid-site-builder.web.app)** · **[🎥 56-second demo](https://www.youtube.com/watch?v=MhyCTNXyjHc)** · **[🏆 Devpost entry](https://devpost.com/software/rapid-site-builder-hire-your-ai-ops-team)**
+**[⚡ Try it live — free](https://rapid-site-builder.web.app)** · **[🎥 3-minute demo](https://www.youtube.com/watch?v=MhyCTNXyjHc)** · **[🏆 Devpost entry](https://devpost.com/software/rapid-site-builder-hire-your-ai-ops-team)**
 
 ![Rapid Site Builder — one line in, a live website plus the AI team that runs it, out](web/og.png)
 
