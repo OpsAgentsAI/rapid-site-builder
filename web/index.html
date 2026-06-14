@@ -259,6 +259,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 </div>
 
 <script src="/device.js"></script>
+<script src="/auth.js"></script>
 <script>
 (() => {
   // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
@@ -483,7 +484,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
             }
           }
           else if (ev.type === 'site') {
-            lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
+            lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage, html: ev.html };
             saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html);
             document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
             ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
@@ -519,11 +520,25 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('publish').disabled = true;
     $('publish').textContent = 'Publishing…';
     try {
-      const r = await fetch(API + '/api/publish', {
+      // Relative on purpose: the call rides the Hosting rewrite so the
+      // first-party __session cookie travels with it (card VI673sym).
+      const doPublish = () => fetch('/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...lastBuild, deviceId: window.RSB_DEVICE })
+        credentials: 'same-origin',
+        body: JSON.stringify({ spec: lastBuild.spec, heroImage: lastBuild.heroImage, deviceId: window.RSB_DEVICE })
       });
-      const j = await r.json();
+      let r = await doPublish();
+      let j = await r.json();
+      if (r.status === 401 && j.signin && window.RSB_AUTH) {
+        // Publish is the sign-in gate. Save the build first — if the popup is
+        // blocked, sign-in falls back to a full redirect and the draft is how
+        // the work survives the round-trip.
+        $('publish').textContent = 'Sign in to publish…';
+        RSB_AUTH.saveDraft(lastBuild);
+        await RSB_AUTH.signIn();          // throws if the user closes the popup
+        r = await doPublish();
+        j = await r.json();
+      }
       if (!r.ok) throw new Error(j.error || 'Publish failed');
       setPill('max', 'd', 'shipped ' + j.url);
       agentsRan.add('max');
@@ -590,6 +605,27 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   $('publish').addEventListener('click', publish);
   $('again').addEventListener('click', () => location.reload());
   $('copy').addEventListener('click', () => navigator.clipboard.writeText($('live-a').href));
+
+  // Draft-resume (card VI673sym): landing back from a redirect-based sign-in,
+  // restore the build that was on screen and finish the publish the user
+  // already asked for. No-op on a normal cold visit.
+  if (window.RSB_AUTH) {
+    RSB_AUTH.completeRedirect().then(async (signedIn) => {
+      const draft = RSB_AUTH.takeDraft();
+      if (!draft || !draft.spec) return;
+      lastBuild = draft;
+      $('intake').style.display = 'none';
+      $('show').style.display = 'block';
+      $('show-sub').textContent = draft.spec.business || '';
+      $('show-title').textContent = 'Your site is ready';
+      if (draft.html) $('frame').srcdoc = draft.html;
+      $('purl').textContent = (draft.spec.business || 'your-site') + ' — built live by the crew';
+      $('show').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      $('preview').style.display = 'block';
+      $('actions').style.display = 'flex';
+      if (signedIn) publish();
+    });
+  }
 })();
 </script>
 </body>

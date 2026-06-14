@@ -19,8 +19,9 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner } = require('./lib/store');
 const { llmsTxt } = require('./lib/llmeo');
+const auth = require('./lib/auth');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -38,6 +39,10 @@ app.use('/api', (req, res, next) => {
     res.set('Vary', 'Origin');
     res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type');
+    // exact-origin echo only, never * — required for the cookie-bearing auth
+    // calls if a page ever talks to this service's own URL instead of the
+    // Hosting rewrite (the normal, first-party path).
+    res.set('Access-Control-Allow-Credentials', 'true');
   }
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
@@ -202,9 +207,96 @@ app.post('/api/build', async (req, res) => {
   }
 });
 
+// ---- auth (card VI673sym) ---------------------------------------------------------
+// Build stays open; Publish is the gate. All four routes ride the Firebase
+// Hosting rewrite (first-party cookie); responses are never CDN-cacheable.
+
+// Public client config so the browser can boot the Firebase Web SDK; apiKey /
+// authDomain are public by design. `me` reflects the caller's session.
+app.get('/api/auth-config', (req, res) => {
+  const session = auth.sessionFromReq(req);
+  res.set('Cache-Control', 'private, no-store').json({
+    authEnabled: auth.AUTH_ENABLED,
+    firebase: auth.AUTH_ENABLED
+      ? { apiKey: auth.FB_API_KEY, authDomain: auth.FB_AUTH_DOMAIN, projectId: auth.FB_PROJECT }
+      : null,
+    me: session ? { uid: session.uid || null, email: session.email || '' } : null
+  });
+});
+
+// Exchange a verified Firebase ID token for our HMAC session cookie.
+app.post('/api/session', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!auth.AUTH_ENABLED) return res.status(503).json({ error: 'Sign-in is not configured on this deployment.' });
+  const idToken = (req.body && req.body.idToken) || '';
+  try {
+    const claims = await auth.verifyFirebaseIdToken(idToken, { projectId: auth.FB_PROJECT });
+    auth.setSessionCookie(res, auth.signSession({
+      exp: Date.now() + auth.SESSION_TTL_MS, uid: claims.sub, email: claims.email || ''
+    }), auth.SESSION_TTL_MS);
+    res.json({ ok: true, uid: claims.sub, email: claims.email || '' });
+  } catch (e) {
+    // generic to the client (no verifier-internal oracle); detail to server logs.
+    console.warn('[auth] /api/session verify rejected:', String((e && e.message) || e));
+    res.status(401).json({ error: 'Sign-in failed.' });
+  }
+});
+
+app.post('/api/logout', (_req, res) => {
+  auth.setSessionCookie(res, '', 0);
+  res.set('Cache-Control', 'private, no-store').json({ ok: true });
+});
+
+// My Sites — one route, two behaviors so the auth-off and auth-on deploys share
+// a codebase. Signed in (auth-enabled deploy): the caller's own sites from the
+// owners/{uid}/ index, never a cross-user list. Otherwise: the anonymous device
+// memory (card jvsQp6cS) answers by ?device= — the 128-bit random id IS the
+// lookup key (possession only, same as knowing the public site URLs).
+app.get('/api/my-sites', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+  // Account path — only reachable when sign-in is configured AND the caller has
+  // a valid session. Never returns another user's sites.
+  if (auth.AUTH_ENABLED) {
+    const session = auth.sessionFromReq(req);
+    if (session && session.uid) {
+      try {
+        const sites = (await listSitesByOwner(session.uid)).map(s => ({ ...s, url: `${base}/sites/${s.id}` }));
+        return res.json({ sites });
+      } catch (e) {
+        return res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+      }
+    }
+  }
+  // Anonymous device path (no session). A malformed/absent id is an invite to
+  // sign in on the auth-on deploy, or a plain bad request on the auth-off one.
+  const device = String(req.query.device || '');
+  if (!/^[a-f0-9]{32}$/.test(device)) {
+    return auth.AUTH_ENABLED
+      ? res.status(401).json({ error: 'Sign in to see your sites.' })
+      : res.status(400).json({ error: 'Bad device id.' });
+  }
+  try {
+    const sites = await listDeviceSites(device);
+    res.json({ sites: sites.map(s => ({ ...s, url: `${base}/sites/${s.id}` })) });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
 // ---- publish --------------------------------------------------------------------
 app.post('/api/publish', async (req, res) => {
   try {
+    // The gate: when sign-in is configured, publishing requires a session so
+    // every published site has an owner. When it isn't (local dev, judge
+    // clone), publish stays anonymous — exactly the pre-auth behavior.
+    const session = auth.AUTH_ENABLED ? auth.sessionFromReq(req) : null;
+    if (auth.AUTH_ENABLED && (!session || !session.uid)) {
+      return res.status(401).set('Cache-Control', 'private, no-store')
+        .json({ error: 'Sign in to publish your site.', signin: true });
+    }
     const spec = req.body && req.body.spec;
     if (!spec || !spec.business) return res.status(400).json({ error: 'Missing site spec to publish.' });
     if (JSON.stringify(spec).length > 100_000) return res.status(413).json({ error: 'Spec too large.' });
@@ -214,10 +306,18 @@ app.post('/api/publish', async (req, res) => {
     // can find it again. Malformed ids are simply ignored — never an error.
     const deviceId = /^[a-f0-9]{32}$/.test(String(req.body.deviceId || '')) ? String(req.body.deviceId) : '';
     const html = render(spec, { heroImage }); // always server-rendered — never client HTML
-    const id = await saveSite(html, {
-      business: String(spec.business).slice(0, 120),
-      ...(deviceId ? { deviceId } : {})
-    });
+    // Stamp ownership two ways, both optional and independent: an owner record
+    // (signed-in publish, card VI673sym) and a device marker (anonymous memory,
+    // card jvsQp6cS). On the auth-off deploy `session` is always null; on the
+    // auth-on deploy a publish without a session is rejected above.
+    const id = await saveSite(
+      html,
+      {
+        business: String(spec.business).slice(0, 120),
+        ...(deviceId ? { deviceId } : {})
+      },
+      session ? { uid: session.uid, email: session.email || '' } : null
+    );
     if (deviceId) await rememberDeviceSite(deviceId, id).catch(() => { /* memory is best-effort */ });
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
     const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
@@ -241,25 +341,6 @@ app.get('/sites/:id/llms.txt', async (req, res) => {
   const txt = await loadLlms(req.params.id);
   if (!txt) return res.status(404).type('text/plain').send('Not found');
   res.set('Cache-Control', 'public, max-age=300').type('text/plain; charset=utf-8').send(txt);
-});
-
-// This device's published sites — convenience memory, not authentication (the
-// 128-bit random id is unguessable; possession of it IS the lookup key, same
-// as knowing the site URLs themselves, which are public pages anyway).
-app.get('/api/my-sites', async (req, res) => {
-  const device = String(req.query.device || '');
-  if (!/^[a-f0-9]{32}$/.test(device)) return res.status(400).json({ error: 'Bad device id.' });
-  try {
-    const sites = await listDeviceSites(device);
-    const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
-    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
-    const base = PUBLIC_BASE_URL || `${proto}://${host}`;
-    res.set('Cache-Control', 'no-store').json({
-      sites: sites.map(s => ({ ...s, url: `${base}/sites/${s.id}` }))
-    });
-  } catch (e) {
-    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
-  }
 });
 
 // ---- ask the orchestrator ---------------------------------------------------------
@@ -324,6 +405,7 @@ app.get('/api/health', (_req, res) => res.json({
   agentEngine: engine.ENABLED,
   imagesBucket: !!process.env.SITE_IMAGES_BUCKET,
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
+  auth: auth.AUTH_ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
