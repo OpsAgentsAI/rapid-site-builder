@@ -283,6 +283,17 @@
   $('drill-x').addEventListener('click', closeDrill);
   $('drill-back').addEventListener('click', closeDrill);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('drill').hidden) closeDrill(); });
+  // Focus trap: keep Tab / Shift+Tab inside the open sheet (role=dialog aria-modal).
+  $('drill-sheet').addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const f = Array.from($('drill-sheet').querySelectorAll(
+      'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
+    )).filter((el) => !el.hidden && el.offsetParent !== null);
+    if (!f.length) { e.preventDefault(); $('drill-sheet').focus(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
 
   async function ask() {
     const q = $('ask-in').value.trim();
