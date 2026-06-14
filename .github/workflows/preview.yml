@@ -1,0 +1,63 @@
+name: PR Preview
+
+# Per-PR Firebase Hosting preview channel — the staging surface for /board-refinement
+# QA. Uses the same WIF identity as deploy.yml (zero local creds, zero tokens).
+# Deliberately does NOT bake __API_BASE__: leaving the placeholder makes board.js
+# call same-origin /api/*, which the firebase.json "**" rewrite proxies to the live
+# rapid-builder-proxy Cloud Run — so the preview avoids cross-origin CORS (the prod
+# ALLOWED_ORIGINS only lists rapid-site-builder.web.app). Trade-off: long landing
+# SSE builds on a preview go through the Hosting proxy 60s cap; fine for QA.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+env:
+  HOSTING_SITE: rapid-site-builder
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy preview channel
+        id: deploy
+        run: |
+          npm install -g firebase-tools@13 >/dev/null 2>&1
+          firebase hosting:channel:deploy "pr-${{ github.event.number }}" \
+            --only "$HOSTING_SITE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --expires 7d --json | tee /tmp/ch.json
+          URL=$(node -e "const j=require('/tmp/ch.json');const s=Object.values(j.result||{})[0]||{};console.log(s.url||'')")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the channel
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          test -n "$URL"
+          curl -sf -o /dev/null -w "board: %{http_code}\n" "$URL/board/"
+          curl -sf -o /dev/null -w "api/health: %{http_code}\n" "$URL/api/health"
+
+      - name: Comment preview URL on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.number }}" --repo "${{ github.repository }}" --body \
+            "🧪 **Preview channel** (board-refinement staging surface): ${{ steps.deploy.outputs.url }} — /board · /campfire · expires 7d. \`/api/*\` proxies to the live Cloud Run via the catch-all rewrite."
