@@ -59,6 +59,11 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .live-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--status-healthy-ink);background:var(--status-healthy-soft);padding:3px 8px;border-radius:var(--radius-pill)}
 .live-tag i{width:5px;height:5px;border-radius:50%;background:var(--status-healthy);animation:blink 1.4s infinite}
 @keyframes blink{50%{opacity:.3}}
+/* site switcher — only shown with ≥2 known sites */
+.switcher{display:flex;align-items:center;gap:9px;margin-bottom:16px;flex-wrap:wrap}
+.switcher label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.switcher select{appearance:none;-webkit-appearance:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);font:inherit;font-size:13.5px;font-weight:600;color:var(--ink);padding:8px 32px 8px 13px;cursor:pointer;outline:none;max-width:100%;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%237A809B' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");background-repeat:no-repeat;background-position:right 12px center}
+.switcher select:focus{border-color:var(--brand-orange);box-shadow:0 0 0 3px rgba(240,94,34,.18)}
 .theo-say{font-size:16.5px;color:var(--ink-2);line-height:1.65;margin-bottom:18px;max-width:58ch}
 .theo-say b{color:var(--ink)}
 .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
@@ -147,6 +152,10 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
           <div class="theo-name" id="theo-name">Theo <span class="live-tag"><i></i>LIVE</span></div>
           <div class="theo-role">Orchestrator · runs the whole team for you</div>
         </div>
+      </div>
+      <div class="switcher" id="switcher" style="display:none">
+        <label for="site-switch">Operating</label>
+        <select id="site-switch" aria-label="Switch which site Theo operates"></select>
       </div>
       <p class="theo-say" id="theo-say"></p>
       <div class="stats" id="stats"></div>
