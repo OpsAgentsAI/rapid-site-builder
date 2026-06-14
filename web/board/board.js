@@ -83,43 +83,62 @@
     } catch { return null; }
   }
 
-  function renderTheo() {
-    const ran = state ? (state.agentsRan || []).filter(a => a !== 'orchestrator') : [];
-    if (state && state.url) {
-      $('theo-say').innerHTML = `Welcome back. <b>${esc(state.business || 'Your site')}</b> is live and healthy — my team of ${Math.max(ran.length, 5)} agents built it and now keeps it running. You don’t need to do anything; I’ll only ask when a decision is truly yours.`;
-      $('site-chip').style.display = 'flex';
-      $('site-name').textContent = state.business || '';
-      const a = $('site-link'); a.href = state.url; a.textContent = state.url.replace(/^https?:\/\//, '');
-      const shot = $('shot');
-      shot.classList.remove('empty');
-      shot.innerHTML = `<iframe src="${esc(state.url)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(state.url)}" target="_blank" rel="noopener">Open site</a>`;
-    } else if (latestMySite()) {
-      // operate_state is per-tab (sessionStorage); a returning user or a fresh
-      // tab still has their published sites on this device — greet with the
-      // newest one instead of a false "no sites" empty state (card jYXyj0lx).
-      // Reduced welcome only: the rich agentsRan view stays same-session.
-      const mine = latestMySite();
-      $('theo-say').innerHTML = `Welcome back — <b>${esc(mine.business || 'your site')}</b> is live. My team keeps it monitored, updated, and secure; I’ll only ask you when a decision is truly yours.`;
-      $('site-chip').style.display = 'flex';
-      $('site-name').textContent = mine.business || '';
-      const a = $('site-link'); a.href = mine.url; a.textContent = String(mine.url || '').replace(/^https?:\/\//, '');
-      const shot = $('shot');
-      shot.classList.remove('empty');
-      shot.innerHTML = `<iframe src="${esc(mine.url)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(mine.url)}" target="_blank" rel="noopener">Open site</a>`;
+  // The merged device-sites list (local my_sites + GET /api/my-sites?device=),
+  // populated by renderMySites() — the switcher reads it (rule: zero new network
+  // calls; reuse renderMySites()'s own fetch result). The id of the site Theo is
+  // currently operating, so the switcher reflects the live selection.
+  let mySites = [];
+  let selectedId = null;
+
+  // The same-session live site (operate_state) carries an id on newer builds; a
+  // returning-user My-Sites entry never has live agentsRan/seoScore. We treat a
+  // chosen site as LIVE only when its url matches the same-session state.url —
+  // matching latestMySite()'s reduced-view behavior for any other entry.
+  function isLiveSite(site) { return !!(state && state.url && site && site.url === state.url); }
+
+  // Paint the Theo hero (greeting, live URL chip, iframe preview, stats) for one
+  // {business,url} site. `live` ⇒ the rich same-session agentsRan view; otherwise
+  // the reduced "returning user" view with an honest minimal stat (no fabricated
+  // agent counts — STD D4). Guards the iframe src to http(s) only.
+  function paintHero(site, live) {
+    const safeUrl = site && /^https?:\/\//.test(String(site.url || '')) ? site.url : '';
+    const business = site ? site.business : '';
+    const ran = live ? (state.agentsRan || []).filter(a => a !== 'orchestrator') : [];
+
+    if (live) {
+      $('theo-say').innerHTML = `Welcome back. <b>${esc(business || 'Your site')}</b> is live and healthy — my team of ${Math.max(ran.length, 5)} agents built it and now keeps it running. You don’t need to do anything; I’ll only ask when a decision is truly yours.`;
     } else {
-      $('theo-say').textContent = 'Hi, I’m Theo. Once you build and publish a site, my team takes over the day-to-day — monitoring, updates, security — and I report here in plain language.';
+      // Reduced welcome only: the rich agentsRan view stays same-session.
+      $('theo-say').innerHTML = `Welcome back — <b>${esc(business || 'your site')}</b> is live. My team keeps it monitored, updated, and secure; I’ll only ask you when a decision is truly yours.`;
     }
+
+    $('site-chip').style.display = 'flex';
+    $('site-name').textContent = business || '';
+    const a = $('site-link'); a.href = safeUrl || '#'; a.textContent = safeUrl.replace(/^https?:\/\//, '');
+    const shot = $('shot');
+    shot.classList.remove('empty');
+    shot.innerHTML = safeUrl
+      ? `<iframe src="${esc(safeUrl)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(safeUrl)}" target="_blank" rel="noopener">Open site</a>`
+      : '<span>No preview available for this site.</span>';
+
     const stats = [];
-    if (ran.length) stats.push([String(ran.length), 'agents on the job']);
-    if (state && state.seoScore) stats.push([String(state.seoScore), 'SEO score · Sam']);
-    if (state && (state.agentsRan || []).includes('phoenix')) stats.push(['Traced', 'run logged · Arize']);
-    if (state && state.url) stats.push(['Live', 'shipped to the web']);
+    if (live) {
+      if (ran.length) stats.push([String(ran.length), 'agents on the job']);
+      if (state.seoScore) stats.push([String(state.seoScore), 'SEO score · Sam']);
+      if ((state.agentsRan || []).includes('phoenix')) stats.push(['Traced', 'run logged · Arize']);
+      stats.push(['Live', 'shipped to the web']);
+    } else if (safeUrl) {
+      // A non-session My-Sites entry has no live agentsRan/seoScore — show only
+      // the honest "it's live" stat, never a fabricated agent count (STD D4).
+      stats.push(['Live', 'shipped to the web']);
+    }
     $('stats').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
 
-    // The needs-you strip only exists for a real site — on an empty board there
-    // is no decision to take (the roster's Uri card keeps its tagged sample gate).
+    // The needs-you strip only exists for the real same-session site — an
+    // arbitrary My-Sites entry has no live decision to take, so hide it (mirrors
+    // the latestMySite() reduced view).
     const needs = $('needs');
-    if (!(state && state.url)) {
+    if (!live) {
       needs.style.display = 'none';
       return;
     }
@@ -132,6 +151,85 @@
       resolved.uri = 'approved'; renderTeam();
       setTimeout(() => { needs.style.display = 'none'; }, 3500);
     };
+  }
+
+  function renderTheo() {
+    if (state && state.url) {
+      selectedId = state.id || null;
+      paintHero({ id: state.id, business: state.business, url: state.url }, true);
+    } else if (latestMySite()) {
+      // operate_state is per-tab (sessionStorage); a returning user or a fresh
+      // tab still has their published sites on this device — greet with the
+      // newest one instead of a false "no sites" empty state (card jYXyj0lx).
+      const mine = latestMySite();
+      selectedId = mine.id || null;
+      paintHero({ id: mine.id, business: mine.business, url: mine.url }, false);
+    } else {
+      $('theo-say').textContent = 'Hi, I’m Theo. Once you build and publish a site, my team takes over the day-to-day — monitoring, updates, security — and I report here in plain language.';
+      $('stats').innerHTML = '';
+      $('needs').style.display = 'none';
+    }
+  }
+
+  // Re-point the hero at a known site by id (switcher change / deep link). Falls
+  // back silently if the id isn't in the merged list. Reflects the choice in the
+  // URL so /board?site=<id> deep links are shareable.
+  function selectSite(id, pushUrl) {
+    const site = mySites.find(s => s.id === id);
+    if (!site) return;
+    selectedId = id;
+    paintHero(site, isLiveSite(site));
+    const sel = $('site-switch'); if (sel) sel.value = id;
+    if (pushUrl) {
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.set('site', id);
+        history.replaceState(null, '', u);
+      } catch { /* noop */ }
+    }
+  }
+
+  // Render the in-hero site switcher from the merged list. Hidden for 0 or 1
+  // known sites (single-site users see no clutter). On first paint, honor a
+  // /board?site=<id> deep link if it matches a known site.
+  function renderSwitcher() {
+    const sel = $('site-switch');
+    const box = $('switcher');
+    if (!sel || !box) return;
+
+    if (mySites.length < 2) { box.style.display = 'none'; return; }
+    box.style.display = 'flex';
+
+    sel.innerHTML = mySites.map(s =>
+      `<option value="${esc(s.id)}">${esc(s.business || s.id)}</option>`
+    ).join('');
+
+    let want = null;
+    try {
+      const q = new URLSearchParams(window.location.search).get('site');
+      if (q && mySites.some(s => s.id === q)) want = q;
+    } catch { /* noop */ }
+
+    if (want) {
+      // Deep link wins on load — select + rehydrate + reflect in the dropdown.
+      selectSite(want, false);
+    } else if (mySites.some(s => s.id === selectedId)) {
+      // The current site (same-session live or the latestMySite greeting) is in
+      // the list — just reflect it in the dropdown; the hero is already painted,
+      // so don't repaint/override the live view.
+      sel.value = selectedId;
+    } else {
+      // No deep link and the current selection isn't a listed site (e.g. a
+      // same-session site with no id, or no session at all). Reflect the newest
+      // entry in the dropdown WITHOUT repainting — preserves the existing hero
+      // (live same-session or empty-state) until the user explicitly switches.
+      sel.value = mySites[0].id;
+    }
+
+    if (!sel.dataset.bound) {
+      sel.dataset.bound = '1';
+      sel.addEventListener('change', () => selectSite(sel.value, true));
+    }
   }
 
   const resolved = {}; // agent id -> 'approved' | 'rejected' (in-card gates, local demo state)
@@ -329,7 +427,9 @@
     // show up from any page that knows this device id. No sign-in involved.
     let mine = [];
     try { mine = JSON.parse(localStorage.getItem('my_sites') || '[]'); } catch { /* noop */ }
+    mySites = mine;
     paintMySites(mine);
+    renderSwitcher();
     try {
       const r = await fetch(API + '/api/my-sites?device=' + encodeURIComponent(window.RSB_DEVICE || ''));
       if (r.ok) {
@@ -340,7 +440,12 @@
         }
         mine.sort((a, b) => (b.at || 0) - (a.at || 0));
         try { localStorage.setItem('my_sites', JSON.stringify(mine.slice(0, 20))); } catch { /* noop */ }
+        mySites = mine;
         paintMySites(mine);
+        // The server list may add the deep-linked / additional sites — re-render
+        // the switcher against the full merged list (reuses this same fetch; no
+        // new network call).
+        renderSwitcher();
       }
     } catch { /* offline or server unreachable — the local list already painted */ }
   }
