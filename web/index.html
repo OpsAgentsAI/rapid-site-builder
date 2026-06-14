@@ -555,7 +555,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           }
           else if (ev.type === 'site') {
             lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage, html: ev.html, userMedia: ev.userMedia || [] };
-            saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html);            document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
+            saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html, ev.userMedia || []);
+            document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
             ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
             $('show-title').textContent = 'Your site is ready';
             $('frame').srcdoc = ev.html;
@@ -594,7 +595,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       const doPublish = () => fetch('/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ spec: lastBuild.spec, heroImage: lastBuild.heroImage, deviceId: window.RSB_DEVICE })
+        body: JSON.stringify({ spec: lastBuild.spec, heroImage: lastBuild.heroImage, userMedia: lastBuild.userMedia || [], deviceId: window.RSB_DEVICE })
       });
       let r = await doPublish();
       let j = await r.json();
@@ -642,9 +643,9 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   // No-sign-in memory (card jvsQp6cS): the generated site survives a reload.
   // The full rendered HTML rides along so restore is instant and offline-safe;
   // it was produced server-side by our renderer, same trust class as my_sites.
-  function saveLastBuild(spec, heroImage, html) {
+  function saveLastBuild(spec, heroImage, html, userMedia) {
     try {
-      localStorage.setItem('last_build', JSON.stringify({ spec, heroImage: heroImage || null, html, at: Date.now() }));
+      localStorage.setItem('last_build', JSON.stringify({ spec, heroImage: heroImage || null, html, userMedia: userMedia || [], at: Date.now() }));
     } catch { /* storage full or off — non-fatal */ }
   }
   function offerRestore() {
@@ -655,7 +656,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('restore-name').textContent = saved.spec.business || 'your site';
     $('restore').style.display = 'block';
     $('restore-go').addEventListener('click', () => {
-      lastBuild = { spec: saved.spec, heroImage: saved.heroImage };
+      lastBuild = { spec: saved.spec, heroImage: saved.heroImage, html: saved.html, userMedia: saved.userMedia || [] };
       $('show').style.display = 'block';
       $('frame').srcdoc = saved.html;
       $('purl').textContent = (saved.spec.business || 'your-site') + ' — restored from this device';
