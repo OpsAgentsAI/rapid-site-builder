@@ -1,0 +1,16 @@
+# Rapid Site Builder
+
+> Describe your business in one line — an AI agent team designs, writes, and ships your website live in front of you, then keeps operating it.
+
+Rapid Site Builder is an AI-agent web team: an orchestrator (Theo) coordinates research (Aria), layout (Leo), copy (Noa), SEO (Sam), and publishing (Max, human-approval gated) agents, with Arize Phoenix observability on every run. Built on Google Cloud Agent Builder (ADK) on Vertex AI Agent Engine, with Gemini models and Gemini image generation. After launch, an operate roster keeps the site monitored, updated, and secure.
+
+## What it does
+- Build: one-line brief → a complete, polished one-page business site, streamed live as the agents work
+- Publish: server-rendered HTML, hosted instantly at a public URL
+- Operate: an agents dashboard where the team keeps working on your site and asks for approval when it matters
+- LLM-EO: every published site ships AI-discoverable — llms.txt, JSON-LD structured data, crawlable server-rendered HTML
+
+## Links
+- [Build a site](https://rapid-site-builder.web.app/)
+- [Agents dashboard](https://rapid-site-builder.web.app/board)
+- [Source (Apache-2.0)](https://github.com/OpsAgentsAI/rapid-site-builder)
