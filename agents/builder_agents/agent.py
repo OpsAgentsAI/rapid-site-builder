@@ -23,33 +23,9 @@ from __future__ import annotations
 import os
 import sys
 
-# Gemini 3 preview models are served from the GLOBAL Vertex endpoint only.
-# GOOGLE_CLOUD_LOCATION is reserved in Agent Engine env_vars (the runtime
-# injects its own region) and the env override alone proved insufficient —
-# the ADK's genai client still bound the regional location. When
-# BUILDER_USE_GLOBAL=1 we therefore patch genai Client construction itself:
-# every client the ADK builds gets location="global", regardless of how or
-# when it imports the class. Model calls route global; the engine's control
-# plane stays regional (managed by Vertex, unaffected).
-if os.environ.get("BUILDER_USE_GLOBAL") == "1":
-    os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
-    try:
-        from google.genai import client as _genai_client_mod
-
-        _orig_client_init = _genai_client_mod.Client.__init__
-
-        def _global_client_init(self, *args, **kwargs):
-            kwargs["location"] = "global"
-            _orig_client_init(self, *args, **kwargs)
-
-        _genai_client_mod.Client.__init__ = _global_client_init
-        print("builder_agents: genai Client patched to location=global", file=sys.stderr)
-    except Exception as _patch_exc:  # pragma: no cover
-        print("WARNING: global-client patch failed (%r); Gemini 3 routing may fail."
-              % _patch_exc, file=sys.stderr)
-
 from google.adk.agents import Agent
 
+from .global_gemini import GlobalGemini
 from .tools import arize_mcp_config_from_env, business_research, layout_proposal, seo_audit
 
 try:
@@ -60,7 +36,16 @@ except Exception as _mcp_exc:  # pragma: no cover
     print("WARNING: ADK MCP toolset import failed (%r); Arize MCP disabled." % _mcp_exc,
           file=sys.stderr)
 
-MODEL = os.environ.get("BUILDER_MODEL", "gemini-2.5-flash")
+# Gemini 3 previews live on the GLOBAL Vertex endpoint only. The routing must
+# travel INSIDE the pickled model object (see global_gemini.py for why env and
+# import-time patches never reach the engine): one shared GlobalGemini instance
+# pins location="global" lazily at runtime. Stable models keep the plain string
+# (regional, ADK default).
+_MODEL_NAME = os.environ.get("BUILDER_MODEL", "gemini-2.5-flash")
+MODEL = GlobalGemini(model=_MODEL_NAME) if os.environ.get("BUILDER_USE_GLOBAL") == "1" else _MODEL_NAME
+print("builder_agents: model=%s routing=%s" % (
+    _MODEL_NAME, "global (GlobalGemini)" if isinstance(MODEL, GlobalGemini) else "regional default"),
+    file=sys.stderr)
 
 
 def _build_arize_mcp_toolset():
