@@ -72,6 +72,49 @@
 
   function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
+  // ===== Dash-C: persisted roster order (localStorage.rsb_board_order) =====
+  // Stored value is the ordered list of agent ids. On load we sort ROSTER by it;
+  // unknown / newly-added ids fall to the end keeping their default order. The
+  // demo state (resolved, live agents) is independent of order, so a reorder is
+  // a pure presentation concern that never touches the gate / approval logic.
+  const ORDER_KEY = 'rsb_board_order';
+  function readOrder() {
+    try {
+      const o = JSON.parse(localStorage.getItem(ORDER_KEY) || '[]');
+      return Array.isArray(o) ? o.filter(x => typeof x === 'string') : [];
+    } catch { return []; }
+  }
+  function applySavedOrder() {
+    const saved = readOrder();
+    if (!saved.length) return;
+    const rank = new Map(saved.map((id, i) => [id, i]));
+    // Stable sort: known ids by saved rank, unknown ids after them in place.
+    ROSTER.sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id) : Infinity;
+      const rb = rank.has(b.id) ? rank.get(b.id) : Infinity;
+      return ra - rb;
+    });
+  }
+  function persistOrder() {
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(ROSTER.map(a => a.id))); } catch { /* noop */ }
+  }
+  // Reorder the in-memory ROSTER moving id `srcId` to before/after `dstId`.
+  function moveInRoster(srcId, dstId, after) {
+    if (srcId === dstId) return false;
+    const from = ROSTER.findIndex(a => a.id === srcId);
+    if (from < 0) return false;
+    const [moved] = ROSTER.splice(from, 1);
+    let to = ROSTER.findIndex(a => a.id === dstId);
+    if (to < 0) { ROSTER.push(moved); return true; }
+    if (after) to += 1;
+    ROSTER.splice(to, 0, moved);
+    return true;
+  }
+  applySavedOrder();
+
+  // ===== Dash-C: live filter state (active chip + free-text query) =====
+  const filterState = { chip: 'all', query: '' };
+
   // Newest published site remembered on this device — the cross-tab fallback
   // when the per-tab operate_state is absent. Only http(s) URLs qualify (the
   // list is device-local, but never let a corrupted entry become an iframe src).
@@ -269,8 +312,18 @@
         needsApproval = a.needsApproval && !res;
       }
 
-      return `<article class="card" data-agent="${a.id}" tabindex="0" role="button" aria-label="${esc(a.name)} — ${esc(a.role)}, open details" style="--hue:var(--agent-${a.color})">
+      // Dash-C: a card's "filter status" = what the user visibly sees. The
+      // pill status (healthy/working/idle) drives Working/Idle chips; a card
+      // currently rendering the approval gate is the "Needs you" bucket.
+      const showGate = !!needsApproval;
+      const fstatus = showGate ? 'needs' : status;
+
+      // Convoy merge (board-refinement, rule #18): Dash-B drill-in attrs
+      // (data-agent/tabindex/role/aria-label) + Dash-C drag/filter attrs
+      // (draggable/data-id/data-fstatus/data-name/data-role) on one card.
+      return `<article class="card" draggable="true" data-agent="${a.id}" data-id="${esc(a.id)}" data-fstatus="${esc(fstatus)}" data-name="${esc(a.name)}" data-role="${esc(a.role)}" tabindex="0" role="button" aria-label="${esc(a.name)} — ${esc(a.role)}, open details" style="--hue:var(--agent-${a.color})">
         <span class="bar" aria-hidden="true"></span>
+        <button type="button" class="drag" aria-label="Reorder ${esc(a.name)}" title="Drag to reorder"><i></i><i></i><i></i></button>
         <header>
           <span class="av${status === 'working' ? ' bob' : ''}"><span class="face"><img alt="" loading="lazy" src="${face(a.name)}"/></span><span class="role-badge" aria-hidden="true">${a.emoji}</span></span>
           <div class="meta"><div class="nm">${esc(a.name)} ${tag}</div><div class="rl">${esc(a.role)}</div></div>
@@ -279,16 +332,170 @@
         <p class="last">${esc(last)}</p>
         ${metric ? `<div class="metric"><b>${esc(metric.value)}</b><span>${esc(metric.label)}</span></div>` : ''}
         ${feed.length ? `<ul class="cfeed">${feed.slice(0, 3).map(l => `<li><i>▸</i><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
-        ${needsApproval ? `<div class="gate"><span class="g-label">✋ Human approval</span><button class="rej" data-act="reject" data-id="${a.id}">Reject</button><button class="app" data-act="approve" data-id="${a.id}">Approve</button></div>` : ''}
+        ${showGate ? `<div class="gate"><span class="g-label">✋ Human approval</span><button class="rej" data-act="reject" data-id="${esc(a.id)}">Reject</button><button class="app" data-act="approve" data-id="${esc(a.id)}">Approve</button></div>` : ''}
         ${isLive || res ? '' : `<span class="sample">sample</span>`}
       </article>`;
     });
-    $('grid').innerHTML = cards.join('');
+    $('grid').innerHTML = cards.join('') + '<div class="grid-empty" id="grid-empty">No agents match this filter.</div>';
+    // CRITICAL: re-attach the in-card approve/reject gate handlers on every
+    // re-render — filtering and dragging both re-render, and dropping this wiring
+    // would silently break the Uri approval gate.
     $('grid').querySelectorAll('.gate button').forEach(b => b.addEventListener('click', () => {
       resolved[b.dataset.id] = b.dataset.act === 'approve' ? 'approved' : 'rejected';
       if (b.dataset.act === 'approve') { const needs = $('needs'); if (needs) needs.style.display = 'none'; }
       renderTeam();
     }));
+    wireDragReorder();
+    applyFilter();
+  }
+
+  // ===== Dash-C: drag-to-reorder (HTML5 DnD + pointer/touch fallback) =====
+  function wireDragReorder() {
+    const grid = $('grid');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll('.card'));
+
+    cards.forEach(card => {
+      // The drag handle keeps the card draggable only when the grip is grabbed,
+      // so text selection / gate clicks elsewhere on the card stay intact.
+      const handle = card.querySelector('.drag');
+
+      // --- HTML5 drag & drop (desktop) ---
+      card.addEventListener('dragstart', (e) => {
+        card.classList.add('dragging');
+        try { e.dataTransfer.setData('text/plain', card.dataset.id); e.dataTransfer.effectAllowed = 'move'; } catch { /* noop */ }
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        cards.forEach(c => c.classList.remove('drag-over'));
+      });
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        card.classList.add('drag-over');
+      });
+      card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
+      card.addEventListener('drop', (e) => {
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        let srcId = '';
+        try { srcId = e.dataTransfer.getData('text/plain'); } catch { /* noop */ }
+        const dstId = card.dataset.id;
+        if (!srcId || srcId === dstId) return;
+        // drop after the target if released on its lower half
+        const r = card.getBoundingClientRect();
+        const after = (e.clientY - r.top) > r.height / 2;
+        if (moveInRoster(srcId, dstId, after)) { persistOrder(); renderTeam(); }
+      });
+
+      // --- Pointer/touch fallback (works at 390px) ---
+      if (handle) {
+        handle.addEventListener('pointerdown', (e) => startPointerDrag(e, card));
+        // Don't let a grip drag start a native text selection / scroll.
+        handle.addEventListener('dragstart', (e) => e.preventDefault());
+      }
+    });
+  }
+
+  // Pointer-based reorder for touch/coarse pointers: grab the grip, move over
+  // another card, release to drop. Mirrors the HTML5 path and persists the same
+  // localStorage order — so reorder survives reload on mobile too.
+  let pdrag = null;
+  function startPointerDrag(e, card) {
+    // Only drive the fallback for non-mouse (touch / pen); mouse uses HTML5 DnD.
+    if (e.pointerType === 'mouse') return;
+    e.preventDefault();
+    pdrag = { srcId: card.dataset.id, card, overId: null, after: false };
+    card.classList.add('grabbed');
+    try { e.target.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp, { once: true });
+    window.addEventListener('pointercancel', onPointerUp, { once: true });
+  }
+  function onPointerMove(e) {
+    if (!pdrag) return;
+    e.preventDefault();
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const over = el && el.closest ? el.closest('.card') : null;
+    const grid = $('grid');
+    grid.querySelectorAll('.card.drag-over').forEach(c => c.classList.remove('drag-over'));
+    if (over && over.dataset.id !== pdrag.srcId) {
+      over.classList.add('drag-over');
+      const r = over.getBoundingClientRect();
+      pdrag.overId = over.dataset.id;
+      pdrag.after = (e.clientY - r.top) > r.height / 2;
+    } else {
+      pdrag.overId = null;
+    }
+  }
+  function onPointerUp() {
+    if (!pdrag) return;
+    const { srcId, overId, after, card } = pdrag;
+    const grid = $('grid');
+    if (grid) grid.querySelectorAll('.card.drag-over').forEach(c => c.classList.remove('drag-over'));
+    card.classList.remove('grabbed');
+    pdrag = null;
+    window.removeEventListener('pointermove', onPointerMove);
+    if (overId && overId !== srcId && moveInRoster(srcId, overId, after)) { persistOrder(); renderTeam(); }
+  }
+
+  // ===== Dash-C: live filtering (chip + text query) =====
+  function applyFilter() {
+    const grid = $('grid');
+    if (!grid) return;
+    const q = filterState.query.trim().toLowerCase();
+    const chip = filterState.chip;
+    let shown = 0;
+    grid.querySelectorAll('.card').forEach(card => {
+      const fstatus = card.dataset.fstatus || 'idle';
+      const matchChip = chip === 'all' || fstatus === chip;
+      const hay = ((card.dataset.name || '') + ' ' + (card.dataset.role || '')).toLowerCase();
+      const matchText = !q || hay.indexOf(q) !== -1;
+      const visible = matchChip && matchText;
+      if (visible) { card.removeAttribute('hidden'); shown++; }
+      else { card.setAttribute('hidden', ''); }
+    });
+    const empty = $('grid-empty');
+    if (empty) empty.style.display = shown ? 'none' : 'block';
+    updateChipCounts();
+  }
+
+  // Each chip carries a live count of how many cards (matching the text query)
+  // would fall into that bucket — recomputed on every render / filter change.
+  function updateChipCounts() {
+    const grid = $('grid');
+    if (!grid) return;
+    const q = filterState.query.trim().toLowerCase();
+    const counts = { all: 0, working: 0, idle: 0, needs: 0 };
+    grid.querySelectorAll('.card').forEach(card => {
+      const hay = ((card.dataset.name || '') + ' ' + (card.dataset.role || '')).toLowerCase();
+      if (q && hay.indexOf(q) === -1) return;
+      counts.all++;
+      const f = card.dataset.fstatus;
+      if (f === 'working') counts.working++;
+      else if (f === 'idle') counts.idle++;
+      else if (f === 'needs') counts.needs++;
+    });
+    document.querySelectorAll('#filter-chips .chip .n').forEach(n => {
+      const k = n.getAttribute('data-count');
+      if (k in counts) n.textContent = String(counts[k]);
+    });
+  }
+
+  function wireFilters() {
+    const chipBar = $('filter-chips');
+    if (chipBar) {
+      chipBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.chip');
+        if (!btn) return;
+        filterState.chip = btn.dataset.filter || 'all';
+        chipBar.querySelectorAll('.chip').forEach(c =>
+          c.setAttribute('aria-pressed', String(c === btn)));
+        applyFilter();
+      });
+    }
+    const q = $('filter-q');
+    if (q) q.addEventListener('input', () => { filterState.query = q.value; applyFilter(); });
   }
 
   // ===== drill-in detail panel (card r9n9Hc8C) =====
@@ -460,6 +667,7 @@
 
   $('ask-go').addEventListener('click', ask);
   $('ask-in').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+  wireFilters();
   renderTheo();
   renderTeam();
   renderMySites();
