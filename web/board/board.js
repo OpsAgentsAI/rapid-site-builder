@@ -189,7 +189,8 @@
           message: q,
           business: state ? state.business : '',
           url: state ? state.url : '',
-          lang: 'en'
+          // Mirror the question's language — a Hebrew question gets a Hebrew answer.
+          lang: /[֐-׿]/.test(q) ? 'he' : 'en'
         })
       });
       const j = await r.json();
