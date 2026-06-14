@@ -129,6 +129,44 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .foot{margin-top:36px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
 .back{display:inline-flex;align-items:center;gap:8px;margin-top:8px;color:var(--brand-orange);font-weight:700;font-size:14px;text-decoration:none}
 .back:hover{text-decoration:underline}
+
+/* ===== drill-in agent detail panel ===== */
+/* Cards become activatable (keyboard + pointer) without changing their look. */
+.card[data-agent]{cursor:pointer}
+.card[data-agent]:focus-visible{outline:2px solid var(--brand-orange);outline-offset:2px}
+#drill[hidden]{display:none}
+#drill{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:24px}
+.drill-back{position:absolute;inset:0;background:rgba(20,22,40,.46);backdrop-filter:blur(2px);animation:drill-fade .18s ease}
+.drill-sheet{position:relative;width:min(520px,100%);max-height:86vh;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);box-shadow:var(--shadow-pop);padding:26px 26px 24px;animation:drill-pop .2s cubic-bezier(.2,.8,.3,1)}
+.drill-sheet:focus{outline:none}
+@keyframes drill-fade{from{opacity:0}}
+@keyframes drill-pop{from{opacity:0;transform:translateY(10px) scale(.98)}}
+.drill-x{position:absolute;inset-inline-end:14px;top:14px;width:34px;height:34px;border:1px solid var(--border);background:var(--surface-sunken);border-radius:var(--radius-pill);color:var(--ink-2);font-size:18px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.drill-x:hover{background:var(--canvas-tint)}
+.drill-x:focus-visible{outline:2px solid var(--brand-orange);outline-offset:2px}
+.drill-head{display:flex;align-items:center;gap:14px;margin-bottom:6px;padding-inline-end:30px}
+.drill-head .nm{font:800 20px/1.15 var(--font-display);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.drill-head .rl{font-size:13px;color:var(--ink-3);margin-top:2px}
+.drill-head .pill{margin-inline-start:auto}
+.drill-sheet .av{width:54px;height:54px;flex:0 0 54px}
+.drill-fn{font-size:14px;color:var(--ink-2);line-height:1.55;margin:14px 0 4px}
+.drill-rows{display:flex;flex-direction:column;gap:0;margin-top:14px;border-top:1px solid var(--border-faint)}
+.drill-row{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-faint)}
+.drill-row .k{flex:0 0 96px;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);padding-top:1px}
+.drill-row .v{flex:1;min-width:0;font-size:13.5px;color:var(--ink-2);line-height:1.45}
+.drill-feed-h{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin:18px 0 9px}
+.drill-feed{list-style:none;display:flex;flex-direction:column;gap:7px;margin:0;padding:0}
+.drill-feed li{display:flex;align-items:flex-start;gap:8px;font-family:var(--font-mono);font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.drill-feed li i{color:var(--hue,var(--agent-blue));font-style:normal;flex:none;margin-top:1px}
+.drill-empty{font-size:13px;color:var(--ink-3);font-style:italic;margin-top:6px}
+@media(max-width:640px){
+  #drill{align-items:flex-end;padding:0}
+  .drill-sheet{width:100%;max-height:90vh;border-radius:var(--radius-2xl) var(--radius-2xl) 0 0;animation:drill-up .24s cubic-bezier(.2,.8,.3,1)}
+}
+@keyframes drill-up{from{transform:translateY(100%)}}
+@media(prefers-reduced-motion:reduce){
+  .drill-back,.drill-sheet{animation:none}
+}
 </style>
 </head>
 <body>
@@ -181,6 +219,15 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 
   <div class="team-h"><h2>The team</h2><span>LIVE = acted in your build just now · the rest run quietly in the background</span></div>
   <div class="grid" id="grid"></div>
+
+  <!-- agent drill-in detail panel (card r9n9Hc8C) — built from ROSTER + live state, no network -->
+  <div id="drill" hidden role="dialog" aria-modal="true" aria-labelledby="drill-name">
+    <div class="drill-back" id="drill-back"></div>
+    <div class="drill-sheet" id="drill-sheet" tabindex="-1">
+      <button class="drill-x" id="drill-x" type="button" aria-label="Close panel">&times;</button>
+      <div id="drill-body"></div>
+    </div>
+  </div>
 
   <p class="foot">
     Build agents run on Google Cloud Agent Builder (ADK) on Vertex AI Agent Engine · every run traced to Arize Phoenix via MCP · roster agents not in this run show sample data.<br/>

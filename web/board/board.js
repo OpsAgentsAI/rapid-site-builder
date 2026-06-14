@@ -52,6 +52,24 @@
 
   const STATUS_LABEL = { healthy: 'Healthy', working: 'Working', stuck: 'Needs approval', idle: 'Idle' };
 
+  // One-line function/responsibility per agent for the drill-in panel. Kept in a
+  // separate const (not merged into ROSTER) so the panel stays purely additive
+  // (card r9n9Hc8C). Keyed by roster id.
+  const FN = {
+    aria: 'Researches your business, market and audience so the rest of the team builds on real ground.',
+    leo: 'Designs the page layout and visual structure — sections, hierarchy and responsive grid.',
+    noa: 'Writes the on-page copy: headlines, body and calls-to-action in your brand voice.',
+    sam: 'Tunes on-page SEO — titles, meta, headings and structured data — for discoverability.',
+    max: 'Publishes the finished site to the web and confirms it is live.',
+    phoenix: 'Traces every agent run to Arize Phoenix so each decision is observable and auditable.',
+    vera: 'Monitors uptime and site health around the clock and raises an alert the moment something slips.',
+    ben: 'Runs scheduled backups and keeps a tested restore path so your site is always recoverable.',
+    uri: 'Watches for core and dependency updates and files a proposal — never changing anything without your approval.',
+    gil: 'Guards the site: security scans, threat watch and rate-limit shielding against abuse.',
+    tova: 'Keeps content fresh and internal links healthy, flagging pages that need a refresh.',
+    cara: 'Manages TLS certificates and auto-renewal so the padlock never lapses.'
+  };
+
   function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
   // Newest published site remembered on this device — the cross-tab fallback
@@ -153,7 +171,7 @@
         needsApproval = a.needsApproval && !res;
       }
 
-      return `<article class="card" style="--hue:var(--agent-${a.color})">
+      return `<article class="card" data-agent="${a.id}" tabindex="0" role="button" aria-label="${esc(a.name)} — ${esc(a.role)}, open details" style="--hue:var(--agent-${a.color})">
         <span class="bar" aria-hidden="true"></span>
         <header>
           <span class="av${status === 'working' ? ' bob' : ''}"><span class="face"><img alt="" loading="lazy" src="${face(a.name)}"/></span><span class="role-badge" aria-hidden="true">${a.emoji}</span></span>
@@ -174,6 +192,97 @@
       renderTeam();
     }));
   }
+
+  // ===== drill-in detail panel (card r9n9Hc8C) =====
+  // Pure-frontend: everything comes from ROSTER + FN + the live `state` already
+  // on the page (no new network calls). Mirrors renderTeam's live/sample logic.
+  let drillReturnFocus = null;
+
+  function agentView(a) {
+    // Same live/sample resolution renderTeam uses, including brief→aria persona map.
+    const ran = new Set(state ? state.agentsRan || [] : []);
+    const lastBy = Object.assign({}, (state && state.lastByAgent) || {});
+    const feedBy = Object.assign({}, (state && state.feedByAgent) || {});
+    if (ran.has('brief')) {
+      ran.add('aria');
+      if (lastBy.brief) lastBy.aria = lastBy.brief;
+      if (feedBy.brief) feedBy.aria = feedBy.brief;
+    }
+    const isLive = ran.has(a.id);
+    const res = resolved[a.id];
+    let status, last, feed;
+    if (isLive) {
+      status = 'healthy';
+      last = lastBy[a.id] || 'Acted in your last build';
+      feed = feedBy[a.id] || [];
+    } else {
+      status = res === 'approved' ? 'healthy' : res === 'rejected' ? 'idle' : (a.status || 'idle');
+      last = res === 'approved' ? 'Approved — on it'
+           : res === 'rejected' ? 'Rejected — staying as is'
+           : (a.sample || 'Handled automatically — nothing for you to do.');
+      feed = a.feed || [];
+    }
+    return { isLive, status, last, feed };
+  }
+
+  function openDrill(id) {
+    const a = ROSTER.find(x => x.id === id);
+    if (!a) return;
+    const v = agentView(a);
+    const tag = v.isLive
+      ? '<span class="live-tag"><i></i>LIVE</span>'
+      : '<span class="sample">sample</span>';
+    const fn = FN[a.id] || a.role;
+    const feedHtml = v.feed.length
+      ? `<div class="drill-feed-h">${v.isLive ? 'Recent activity' : 'Sample activity'}</div>
+         <ul class="drill-feed">${v.feed.map(l => `<li><i>▸</i><span>${esc(l)}</span></li>`).join('')}</ul>`
+      : '<div class="drill-empty">No recent activity lines for this agent yet.</div>';
+
+    $('drill-body').innerHTML = `
+      <div class="drill-head" style="--hue:var(--agent-${a.color})">
+        <span class="av"><span class="face"><img alt="" src="${face(a.name)}"/></span><span class="role-badge" aria-hidden="true">${a.emoji}</span></span>
+        <div class="meta"><div class="nm" id="drill-name">${esc(a.name)} ${tag}</div><div class="rl">${esc(a.role)}</div></div>
+        <span class="pill ${v.status}">${STATUS_LABEL[v.status]}</span>
+      </div>
+      <p class="drill-fn">${esc(fn)}</p>
+      <div class="drill-rows">
+        <div class="drill-row"><span class="k">Status</span><span class="v">${STATUS_LABEL[v.status]}</span></div>
+        <div class="drill-row"><span class="k">Function</span><span class="v">${esc(a.role)}</span></div>
+        <div class="drill-row"><span class="k">Source</span><span class="v">${v.isLive ? 'LIVE — acted in your last build' : 'SAMPLE — illustrative, no run this session'}</span></div>
+        <div class="drill-row"><span class="k">Last activity</span><span class="v">${esc(v.last)}</span></div>
+      </div>
+      ${feedHtml}`;
+
+    const drill = $('drill');
+    drill.style.setProperty('--hue', `var(--agent-${a.color})`);
+    drill.hidden = false;
+    drillReturnFocus = document.activeElement;
+    $('drill-sheet').focus();
+  }
+
+  function closeDrill() {
+    const drill = $('drill');
+    if (drill.hidden) return;
+    drill.hidden = true;
+    if (drillReturnFocus && typeof drillReturnFocus.focus === 'function') drillReturnFocus.focus();
+    drillReturnFocus = null;
+  }
+
+  // Open via event delegation on the grid; gate buttons must NOT open the panel.
+  $('grid').addEventListener('click', (e) => {
+    if (e.target.closest('.gate')) return;
+    const card = e.target.closest('.card[data-agent]');
+    if (card) openDrill(card.dataset.agent);
+  });
+  $('grid').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    if (e.target.closest('.gate')) return;
+    const card = e.target.closest('.card[data-agent]');
+    if (card && card === e.target) { e.preventDefault(); openDrill(card.dataset.agent); }
+  });
+  $('drill-x').addEventListener('click', closeDrill);
+  $('drill-back').addEventListener('click', closeDrill);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('drill').hidden) closeDrill(); });
 
   async function ask() {
     const q = $('ask-in').value.trim();
