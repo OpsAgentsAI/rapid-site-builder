@@ -213,6 +213,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       </div>
       <button class="go" id="go">Build my site — watch the team work</button>
       <p class="free">Free · no signup · about two minutes</p>
+      <div id="restore" style="display:none;margin-top:14px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;font-size:13.5px;color:var(--ink-2)">💾 Your last build is saved on this device — <b id="restore-name"></b><button class="btn ghost" id="restore-go" style="padding:6px 14px;font-size:12.5px;margin-inline-start:10px">Bring it back</button></div>
     </div>
   </section>
 
@@ -256,6 +257,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   <footer class="page">Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana Pro (Gemini 3) image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere. · <a href="/campfire">The campfire</a></footer>
 </div>
 
+<script src="/device.js"></script>
 <script>
 (() => {
   // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
@@ -481,6 +483,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           }
           else if (ev.type === 'site') {
             lastBuild = { spec: ev.spec, heroImage: ev.heroImage || heroImage };
+            saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html);
             document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
             ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
             $('show-title').textContent = 'Your site is ready';
@@ -517,7 +520,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     try {
       const r = await fetch(API + '/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(lastBuild)
+        body: JSON.stringify({ ...lastBuild, deviceId: window.RSB_DEVICE })
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Publish failed');
@@ -541,6 +544,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         const mine = JSON.parse(localStorage.getItem('my_sites') || '[]');
         mine.unshift({ id: j.id, url: j.url, business: lastBuild.spec.business, at: Date.now() });
         localStorage.setItem('my_sites', JSON.stringify(mine.slice(0, 20)));
+        localStorage.removeItem('last_build'); // it's live now — the server remembers it by device id
       } catch { /* storage unavailable — non-fatal */ }
     } catch (e) {
       $('err').textContent = (e.message || e);
@@ -549,6 +553,37 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       $('publish').textContent = 'Publish it — free';
     }
   }
+
+  // No-sign-in memory (card jvsQp6cS): the generated site survives a reload.
+  // The full rendered HTML rides along so restore is instant and offline-safe;
+  // it was produced server-side by our renderer, same trust class as my_sites.
+  function saveLastBuild(spec, heroImage, html) {
+    try {
+      localStorage.setItem('last_build', JSON.stringify({ spec, heroImage: heroImage || null, html, at: Date.now() }));
+    } catch { /* storage full or off — non-fatal */ }
+  }
+  function offerRestore() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('last_build') || 'null'); } catch { /* noop */ }
+    if (!saved || !saved.spec || !saved.html) return;
+    if (Date.now() - (saved.at || 0) > 7 * 24 * 3600 * 1000) return; // a week-old draft is stale
+    $('restore-name').textContent = saved.spec.business || 'your site';
+    $('restore').style.display = 'block';
+    $('restore-go').addEventListener('click', () => {
+      lastBuild = { spec: saved.spec, heroImage: saved.heroImage };
+      $('show').style.display = 'block';
+      $('frame').srcdoc = saved.html;
+      $('purl').textContent = (saved.spec.business || 'your-site') + ' — restored from this device';
+      $('pstate').textContent = 'restored';
+      $('pstate').className = 'pstate done';
+      $('show-title').textContent = 'Your site is back — publish when ready';
+      $('preview').style.display = 'block';
+      $('actions').style.display = 'flex';
+      $('restore').style.display = 'none';
+      $('preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+  offerRestore();
 
   $('go').addEventListener('click', build);
   $('publish').addEventListener('click', publish);
