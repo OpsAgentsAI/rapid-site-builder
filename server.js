@@ -19,7 +19,8 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite, rememberDeviceSite, listDeviceSites } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms } = require('./lib/store');
+const { llmsTxt } = require('./lib/llmeo');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -221,6 +222,9 @@ app.post('/api/publish', async (req, res) => {
     const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
     const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
     const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+    // LLM-EO: publish llms.txt next to the HTML so AI assistants can read the
+    // business at a glance (llmstxt.org). Non-fatal — the site is the product.
+    try { await saveLlms(id, llmsTxt(spec, `${base}/sites/${id}`)); } catch { /* best-effort */ }
     res.json({ id, url: `${base}/sites/${id}` });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
@@ -231,6 +235,12 @@ app.get(['/sites/:id', '/sites/:id/'], async (req, res) => {
   const html = await loadSite(req.params.id);
   if (!html) return res.status(404).type('text/plain').send('Site not found');
   res.set('Cache-Control', 'public, max-age=300').type('html').send(html);
+});
+
+app.get('/sites/:id/llms.txt', async (req, res) => {
+  const txt = await loadLlms(req.params.id);
+  if (!txt) return res.status(404).type('text/plain').send('Not found');
+  res.set('Cache-Control', 'public, max-age=300').type('text/plain; charset=utf-8').send(txt);
 });
 
 // This device's published sites — convenience memory, not authentication (the

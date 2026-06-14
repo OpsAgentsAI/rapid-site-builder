@@ -1,0 +1,35 @@
+# Rapid Site Builder — crawl policy (card peIktfIK)
+# Everything here is public: the builder's own pages and every published
+# customer site under /sites/. AI assistants and their crawlers are welcome —
+# "your AI-built site is also AI-found".
+
+User-agent: *
+Allow: /
+
+# Explicit welcome for AI crawlers (some only honor a named record)
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
