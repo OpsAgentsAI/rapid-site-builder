@@ -54,6 +54,17 @@
 
   function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
+  // Newest published site remembered on this device — the cross-tab fallback
+  // when the per-tab operate_state is absent. Only http(s) URLs qualify (the
+  // list is device-local, but never let a corrupted entry become an iframe src).
+  function latestMySite() {
+    try {
+      const mine = JSON.parse(localStorage.getItem('my_sites') || '[]');
+      const s = Array.isArray(mine) ? mine[0] : null;
+      return s && /^https?:\/\//.test(String(s.url || '')) ? s : null;
+    } catch { return null; }
+  }
+
   function renderTheo() {
     const ran = state ? (state.agentsRan || []).filter(a => a !== 'orchestrator') : [];
     if (state && state.url) {
@@ -64,6 +75,19 @@
       const shot = $('shot');
       shot.classList.remove('empty');
       shot.innerHTML = `<iframe src="${esc(state.url)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(state.url)}" target="_blank" rel="noopener">Open site</a>`;
+    } else if (latestMySite()) {
+      // operate_state is per-tab (sessionStorage); a returning user or a fresh
+      // tab still has their published sites on this device — greet with the
+      // newest one instead of a false "no sites" empty state (card jYXyj0lx).
+      // Reduced welcome only: the rich agentsRan view stays same-session.
+      const mine = latestMySite();
+      $('theo-say').innerHTML = `Welcome back — <b>${esc(mine.business || 'your site')}</b> is live. My team keeps it monitored, updated, and secure; I’ll only ask you when a decision is truly yours.`;
+      $('site-chip').style.display = 'flex';
+      $('site-name').textContent = mine.business || '';
+      const a = $('site-link'); a.href = mine.url; a.textContent = String(mine.url || '').replace(/^https?:\/\//, '');
+      const shot = $('shot');
+      shot.classList.remove('empty');
+      shot.innerHTML = `<iframe src="${esc(mine.url)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(mine.url)}" target="_blank" rel="noopener">Open site</a>`;
     } else {
       $('theo-say').textContent = 'Hi, I’m Theo. Once you build and publish a site, my team takes over the day-to-day — monitoring, updates, security — and I report here in plain language.';
     }
