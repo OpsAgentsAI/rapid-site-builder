@@ -21,6 +21,7 @@
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Rapid Site Builder","applicationCategory":"DesignApplication","operatingSystem":"Web","description":"Describe your business in one line — an AI agent team designs, writes, and ships your website live, then keeps operating it.","url":"https://rapid-site-builder.web.app/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"OpsAgents","url":"https://opsagents.agency/"}}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="/i18n.js"></script>
 <style>
 /* OpsAgents Agents Dashboard Design System — tokens (condensed) */
 :root{
@@ -176,6 +177,13 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 footer.page{padding:36px 0 28px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
 footer.page b{color:var(--ink-2)}
 footer.page a{color:var(--brand-orange);text-decoration:none}
+/* language switcher + RTL */
+.langbtn{font:700 13px var(--font-display);color:var(--ink-2);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-pill);padding:7px 16px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.langbtn:hover{border-color:var(--brand-orange);color:var(--brand-orange);background:var(--brand-orange-soft)}
+[dir=rtl] select{background-position:left 14px center;padding-inline-end:14px;padding-inline-start:42px}
+[dir=rtl] .bub .msg{border-radius:14px 4px 14px 14px}
+[dir=rtl] .wordmark .br{display:inline-block;transform:scaleX(-1)}
+[dir=rtl] .agent .last,[dir=rtl] .preview .url,[dir=rtl] .bub pre{direction:rtl;text-align:start}
 </style>
 </head>
 <body>
@@ -186,96 +194,97 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     <span class="badge"><b>Gemini</b> + Nano Banana Pro (Gemini 3) images</span>
     <span class="badge"><b>Arize Phoenix</b> MCP observability</span>
   </div>
+  <button class="langbtn" id="langbtn" type="button" data-i18n="lang.toggle" data-i18n-aria="lang.aria">עברית</button>
 </div></header>
 <div class="wrap">
 
   <!-- ============ INTAKE ============ -->
   <section id="intake">
-    <h1>Meet the AI team that builds your website <em>in front of you</em></h1>
-    <p class="sub">One line about your business. Five specialist agents — research, design, copy, SEO, observability — go to work live. Watch them ship your site. Free.</p>
+    <h1 data-i18n-html="hero.h1">Meet the AI team that builds your website <em>in front of you</em></h1>
+    <p class="sub" data-i18n="hero.sub">One line about your business. Five specialist agents — research, design, copy, SEO, observability — go to work live. Watch them ship your site. Free.</p>
     <div class="formcard">
       <div class="chips" id="chips">
-        <button class="chip" type="button">Neighborhood specialty coffee bar in Tel Aviv</button>
-        <button class="chip" type="button">Boutique pilates studio for busy parents</button>
-        <button class="chip" type="button">Family real-estate agency, 20 years in the Sharon</button>
-        <button class="chip" type="button">Cozy neighborhood bakery with a wood-fired oven</button>
+        <button class="chip" type="button" data-cat="food_beverage" data-i18n="chip.1">Neighborhood specialty coffee bar in Tel Aviv</button>
+        <button class="chip" type="button" data-cat="fitness" data-i18n="chip.2">Boutique pilates studio for busy parents</button>
+        <button class="chip" type="button" data-cat="real_estate" data-i18n="chip.3">Family real-estate agency, 20 years in the Sharon</button>
+        <button class="chip" type="button" data-cat="food_beverage" data-i18n="chip.4">Cozy neighborhood bakery with a wood-fired oven</button>
       </div>
       <div class="frow">
-        <div><label for="business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna"/></div>
-        <div><label for="category">Category</label>
+        <div><label for="business" data-i18n="label.business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna" data-i18n-ph="ph.business"/></div>
+        <div><label for="category" data-i18n="label.category">Category</label>
           <select id="category">
-            <option value="food_beverage">Food &amp; beverage</option>
-            <option value="retail">Retail &amp; shop</option>
-            <option value="beauty">Beauty &amp; wellness</option>
-            <option value="health">Health &amp; clinics</option>
-            <option value="fitness">Fitness &amp; studio</option>
-            <option value="professional" selected>Professional services</option>
-            <option value="tech">Tech &amp; startup</option>
-            <option value="real_estate">Real estate</option>
-            <option value="education">Education</option>
-            <option value="events">Events &amp; hospitality</option>
-            <option value="other">Other — let the team figure it out</option>
+            <option value="food_beverage" data-i18n="cat.food_beverage">Food &amp; beverage</option>
+            <option value="retail" data-i18n="cat.retail">Retail &amp; shop</option>
+            <option value="beauty" data-i18n="cat.beauty">Beauty &amp; wellness</option>
+            <option value="health" data-i18n="cat.health">Health &amp; clinics</option>
+            <option value="fitness" data-i18n="cat.fitness">Fitness &amp; studio</option>
+            <option value="professional" selected data-i18n="cat.professional">Professional services</option>
+            <option value="tech" data-i18n="cat.tech">Tech &amp; startup</option>
+            <option value="real_estate" data-i18n="cat.real_estate">Real estate</option>
+            <option value="education" data-i18n="cat.education">Education</option>
+            <option value="events" data-i18n="cat.events">Events &amp; hospitality</option>
+            <option value="other" data-i18n="cat.other">Other — let the team figure it out</option>
           </select>
         </div>
       </div>
       <div class="frow">
-        <div><label for="description">One line about it</label><input id="description" maxlength="400" placeholder="Specialty coffee roasted in-house, pastries from our own oven"/></div>
-        <div><label for="style">Vibe (optional)</label>
-          <select id="style"><option value="default">Let the team pick</option><option value="warm">Warm</option><option value="fresh">Fresh</option><option value="modern">Modern</option><option value="trust">Trustworthy</option><option value="bold">Bold</option></select>
+        <div><label for="description" data-i18n="label.description">One line about it</label><input id="description" maxlength="400" placeholder="Specialty coffee roasted in-house, pastries from our own oven" data-i18n-ph="ph.description"/></div>
+        <div><label for="style" data-i18n="label.style">Vibe (optional)</label>
+          <select id="style"><option value="default" data-i18n="style.default">Let the team pick</option><option value="warm" data-i18n="style.warm">Warm</option><option value="fresh" data-i18n="style.fresh">Fresh</option><option value="modern" data-i18n="style.modern">Modern</option><option value="trust" data-i18n="style.trust">Trustworthy</option><option value="bold" data-i18n="style.bold">Bold</option></select>
         </div>
       </div>
       <div class="mediarow">
-        <label for="mfiles">Your photos &amp; videos <span class="opt">(optional — the team features them on your site)</span></label>
+        <label for="mfiles"><span data-i18n="media.label">Your photos &amp; videos</span> <span class="opt" data-i18n="media.opt">(optional — the team features them on your site)</span></label>
         <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos">
           <input id="mfiles" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden/>
-          Drop files here or <button type="button" class="linklike" id="mpick">browse</button> — up to 8 · photos ≤15MB · video ≤100MB
+          <span data-i18n="media.drop">Drop files here or</span> <button type="button" class="linklike" id="mpick" data-i18n="media.browse">browse</button> <span data-i18n="media.limits">— up to 8 · photos ≤15MB · video ≤100MB</span>
         </div>
         <div class="mchips" id="mchips"></div>
       </div>
-      <button class="go" id="go">Build my site — watch the team work</button>
-      <p class="free">Free · no signup · about two minutes</p>
-      <div id="restore" style="display:none;margin-top:14px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;font-size:13.5px;color:var(--ink-2)">💾 Your last build is saved on this device — <b id="restore-name"></b><button class="btn ghost" id="restore-go" style="padding:6px 14px;font-size:12.5px;margin-inline-start:10px">Bring it back</button></div>
+      <button class="go" id="go" data-i18n="go">Build my site — watch the team work</button>
+      <p class="free" data-i18n="free">Free · no signup · about two minutes</p>
+      <div id="restore" style="display:none;margin-top:14px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;font-size:13.5px;color:var(--ink-2)"><span data-i18n="restore.saved">💾 Your last build is saved on this device —</span> <b id="restore-name"></b><button class="btn ghost" id="restore-go" style="padding:6px 14px;font-size:12.5px;margin-inline-start:10px" data-i18n="restore.bring">Bring it back</button></div>
     </div>
   </section>
 
   <!-- ============ THE AGENTS SHOW ============ -->
   <section id="show">
     <div class="show-head">
-      <h2 id="show-title">Your AI team is on it</h2>
+      <h2 id="show-title" data-i18n="show.title">Your AI team is on it</h2>
       <span class="who" id="show-sub"></span>
     </div>
     <div class="phases" id="phases">
-      <div class="phase" data-p="0"><span class="dot"></span> Research &amp; layout</div>
-      <div class="phase" data-p="1"><span class="dot"></span> Copy &amp; SEO</div>
-      <div class="phase" data-p="2"><span class="dot"></span> Observability</div>
-      <div class="phase" data-p="3"><span class="dot"></span> Final assembly</div>
+      <div class="phase" data-p="0"><span class="dot"></span> <span data-i18n="phase.0">Research &amp; layout</span></div>
+      <div class="phase" data-p="1"><span class="dot"></span> <span data-i18n="phase.1">Copy &amp; SEO</span></div>
+      <div class="phase" data-p="2"><span class="dot"></span> <span data-i18n="phase.2">Observability</span></div>
+      <div class="phase" data-p="3"><span class="dot"></span> <span data-i18n="phase.3">Final assembly</span></div>
     </div>
     <div class="stage">
       <div class="crew" id="crew"></div>
       <div class="main-col">
         <div class="preview" id="preview">
-          <div class="pbar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span><span class="url" id="purl">preview — built by your agent team</span><span class="pstate" id="pstate"></span></div>
+          <div class="pbar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span><span class="url" id="purl" data-i18n="preview.url">preview — built by your agent team</span><span class="pstate" id="pstate"></span></div>
           <iframe id="frame" sandbox title="Generated website preview"></iframe>
         </div>
         <div class="err" id="err"></div>
         <div class="actions" id="actions">
-          <button class="btn primary" id="publish">Publish it — free</button>
-          <a class="btn ghost" id="board-link" href="/board">Meet your ops team</a>
-          <button class="btn ghost" id="again">Build another</button>
+          <button class="btn primary" id="publish" data-i18n="publish">Publish it — free</button>
+          <a class="btn ghost" id="board-link" href="/board" data-i18n="board.link">Meet your ops team</a>
+          <button class="btn ghost" id="again" data-i18n="again">Build another</button>
         </div>
-        <div class="live-url" id="live">Live: <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px">Copy</button></div>
+        <div class="live-url" id="live"><span data-i18n="live.label">Live:</span> <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px" data-i18n="copy">Copy</button></div>
       </div>
       <aside class="side-col">
-        <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
+        <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span data-i18n-html="arize.banner"><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
         <div class="console">
-          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> the team, live · Vertex AI Agent Engine</div>
+          <div class="bar"><span class="lights"><i style="background:#E2445C"></i><i style="background:#FDAB3D"></i><i style="background:#00C875"></i></span> <span data-i18n="console.bar">the team, live · Vertex AI Agent Engine</span></div>
           <div class="body" id="feed" aria-live="polite"></div>
         </div>
       </aside>
     </div>
   </section>
 
-  <footer class="page">Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana Pro (Gemini 3) image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere. · <a href="/campfire">The campfire</a></footer>
+  <footer class="page" data-i18n-html="footer">Built with <b>Google Cloud Agent Builder (ADK)</b> on Vertex AI Agent Engine · <b>Gemini</b> + Nano Banana Pro (Gemini 3) image generation · <b>Arize Phoenix MCP</b> observability · no other AI anywhere. · <a href="/campfire">The campfire</a></footer>
 </div>
 
 <script src="/device.js"></script>
@@ -287,6 +296,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   const RAW_API = '__API_BASE__';
   const API = RAW_API.startsWith('http') ? RAW_API : '';
   const $ = (id) => document.getElementById(id);
+  const T = (k, v) => (window.RSB_I18N ? RSB_I18N.t(k, v) : k);
 
   // Design-system characters: DiceBear Adventurer face on a hue ring, role
   // emoji as a small corner badge (matches the kit's Avatar component).
@@ -304,8 +314,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     <div class="agent" data-a="${p.id}" style="--hue:${p.hue}">
       <span class="bar" aria-hidden="true"></span>
       <span class="av"><span class="face"><img alt="" src="${face(p.seed)}"/></span><span class="role-badge" aria-hidden="true">${p.emoji}</span></span>
-      <div class="meta"><div class="nm">${p.name}</div><div class="rl">${p.role}</div><div class="last"></div></div>
-      <span class="pill q">queued</span>
+      <div class="meta"><div class="nm">${p.name}</div><div class="rl">${T('role.'+p.id)}</div><div class="last"></div></div>
+      <span class="pill q">${T('pill.queued')}</span>
     </div>`).join('');
 
   const AGENT_MAP = [
@@ -374,12 +384,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 
   $('chips').addEventListener('click', (e) => {
     const b = e.target.closest('.chip'); if (!b) return;
-    const t = b.textContent.trim();
-    $('description').value = t;
-    if (/coffee|cafe/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = 'Cafe Luna'; }
-    else if (/bakery/i.test(t)) { $('category').value = 'food_beverage'; if (!$('business').value) $('business').value = 'Ember & Crumb'; }
-    else if (/pilates|studio/i.test(t)) { $('category').value = 'fitness'; if (!$('business').value) $('business').value = 'Studio Flow'; }
-    else if (/real-?estate/i.test(t)) { $('category').value = 'real_estate'; if (!$('business').value) $('business').value = 'HaSharon Homes'; }
+    $('description').value = b.textContent.trim();
+    if (b.dataset.cat) $('category').value = b.dataset.cat;
   });
 
   function personaFor(author) {
@@ -392,8 +398,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     const pill = el.querySelector('.pill');
     const av = el.querySelector('.av');
     av.classList.remove('bob');
-    if (state === 'w') { el.classList.add('working'); av.classList.add('bob'); pill.className = 'pill w'; pill.textContent = 'working'; }
-    if (state === 'd') { el.classList.add('done'); pill.className = 'pill d'; pill.textContent = 'done'; }
+    if (state === 'w') { el.classList.add('working'); av.classList.add('bob'); pill.className = 'pill w'; pill.textContent = T('pill.working'); }
+    if (state === 'd') { el.classList.add('done'); pill.className = 'pill d'; pill.textContent = T('pill.done'); }
     if (lastText) el.querySelector('.last').textContent = lastText.slice(0, 90);
   }
   const personaOf = (key) => PERSONAS.find(p => p.id === key);
@@ -495,7 +501,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       business: $('business').value.trim(),
       category: $('category').value,
       description: $('description').value.trim(),
-      lang: 'en',
+      lang: (window.RSB_I18N ? RSB_I18N.lang : 'en'),
       style: $('style').value,
       media: MEDIA.map(m => m.name)
     };
@@ -503,7 +509,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('go').disabled = true;
     $('intake').style.display = 'none';
     $('show').style.display = 'block';
-    $('show-sub').textContent = (brief.business || 'your business') + ' · ' + $('category').selectedOptions[0].text;
+    $('show-sub').textContent = (brief.business || T('dyn.yourbiz')) + ' · ' + $('category').selectedOptions[0].text;
     $('err').style.display = 'none';
     lastBuild = null; draftBuild = null;
     $('preview').style.display = 'none';
@@ -514,8 +520,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     phase(0);
     setPill('theo', 'w');
     agentsRan.add('theo');
-    feed('opsagents_builder_orchestrator',
-      `Got it — ${brief.business || 'your business'}. Briefing the team now; Aria opens with research.`);
+    feed('opsagents_builder_orchestrator', T('dyn.greeting', { business: brief.business || T('dyn.yourbiz') }));
 
     let heroImage = null;
     try {
@@ -541,15 +546,15 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
           if (ev.type === 'phase') phase(ev.n);
           else if (ev.type === 'step') feed(ev.agent, ev.text);
-          else if (ev.type === 'image') { heroImage = ev.url; if (draftBuild && !draftBuild.heroImage) draftBuild.heroImage = ev.url; feed('layout_agent', 'Hero photography is in — picked from our Gemini image studio.'); }
+          else if (ev.type === 'image') { heroImage = ev.url; if (draftBuild && !draftBuild.heroImage) draftBuild.heroImage = ev.url; feed('layout_agent', T('dyn.hero')); }
           else if (ev.type === 'draft') {
             if (!lastBuild) {
               draftBuild = { spec: ev.spec, heroImage: heroImage };
               $('frame').srcdoc = ev.html;
-              $('purl').textContent = (brief.business || 'your business') + ' — first draft · the team is refining it live';
-              $('pstate').textContent = 'first draft';
+              $('purl').textContent = T('dyn.purl.draft', { business: brief.business || T('dyn.yourbiz') });
+              $('pstate').textContent = T('dyn.pstate.draft');
               $('pstate').className = 'pstate draft';
-              $('show-title').textContent = 'First draft is up — the team is refining it';
+              $('show-title').textContent = T('dyn.title.draft');
               $('preview').style.display = 'block';
             }
           }
@@ -558,10 +563,10 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
             saveLastBuild(ev.spec, ev.heroImage || heroImage, ev.html, ev.userMedia || []);
             document.querySelectorAll('.phase').forEach(p => { p.classList.add('done'); p.classList.remove('active'); });
             ['theo','brief','leo','noa','sam','phoenix'].forEach(k => agentsRan.has(k) && setPill(k, 'd'));
-            $('show-title').textContent = 'Your site is ready';
+            $('show-title').textContent = T('dyn.title.ready');
             $('frame').srcdoc = ev.html;
-            $('purl').textContent = (ev.spec.business || 'your-site') + ' — built live by the crew';
-            $('pstate').textContent = 'refined by the team';
+            $('purl').textContent = T('dyn.purl.site', { business: ev.spec.business || T('dyn.yourbiz') });
+            $('pstate').textContent = T('dyn.pstate.site');
             $('pstate').className = 'pstate done';
             $('preview').style.display = 'block';
             $('actions').style.display = 'flex';
@@ -575,7 +580,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       $('actions').style.display = 'flex';
       if (!lastBuild && draftBuild) {
         lastBuild = draftBuild;
-        $('err').textContent = 'The live crew hit a snag mid-run — your first draft below is ready and publishable; build again for the fully refined version.';
+        $('err').textContent = T('dyn.err.snag');
       } else {
         $('err').textContent = (e.message || e);
         if (!lastBuild) $('publish').style.display = 'none';
@@ -588,7 +593,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   async function publish() {
     if (!lastBuild) return;
     $('publish').disabled = true;
-    $('publish').textContent = 'Publishing…';
+    $('publish').textContent = T('dyn.publishing');
     try {
       // Relative on purpose: the call rides the Hosting rewrite so the
       // first-party __session cookie travels with it (card VI673sym).
@@ -603,7 +608,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         // Publish is the sign-in gate. Save the build first — if the popup is
         // blocked, sign-in falls back to a full redirect and the draft is how
         // the work survives the round-trip.
-        $('publish').textContent = 'Sign in to publish…';
+        $('publish').textContent = T('dyn.signin');
         RSB_AUTH.saveDraft(lastBuild);
         await RSB_AUTH.signIn();          // throws if the user closes the popup
         r = await doPublish();
@@ -636,7 +641,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       $('err').textContent = (e.message || e);
       $('err').style.display = 'block';
       $('publish').disabled = false;
-      $('publish').textContent = 'Publish it — free';
+      $('publish').textContent = T('publish');
     }
   }
 
@@ -659,10 +664,10 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       lastBuild = { spec: saved.spec, heroImage: saved.heroImage, html: saved.html, userMedia: saved.userMedia || [] };
       $('show').style.display = 'block';
       $('frame').srcdoc = saved.html;
-      $('purl').textContent = (saved.spec.business || 'your-site') + ' — restored from this device';
-      $('pstate').textContent = 'restored';
+      $('purl').textContent = T('dyn.purl.restore', { business: saved.spec.business || T('dyn.yourbiz') });
+      $('pstate').textContent = T('dyn.pstate.restore');
       $('pstate').className = 'pstate done';
-      $('show-title').textContent = 'Your site is back — publish when ready';
+      $('show-title').textContent = T('dyn.title.restore');
       $('preview').style.display = 'block';
       $('actions').style.display = 'flex';
       $('restore').style.display = 'none';
@@ -671,6 +676,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   }
   offerRestore();
 
+  $('langbtn').addEventListener('click', () => RSB_I18N.setLang(RSB_I18N.lang === 'he' ? 'en' : 'he'));
   $('go').addEventListener('click', build);
   $('publish').addEventListener('click', publish);
   $('again').addEventListener('click', () => location.reload());
@@ -687,9 +693,9 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       $('intake').style.display = 'none';
       $('show').style.display = 'block';
       $('show-sub').textContent = draft.spec.business || '';
-      $('show-title').textContent = 'Your site is ready';
+      $('show-title').textContent = T('dyn.title.ready');
       if (draft.html) $('frame').srcdoc = draft.html;
-      $('purl').textContent = (draft.spec.business || 'your-site') + ' — built live by the crew';
+      $('purl').textContent = T('dyn.purl.site', { business: draft.spec.business || T('dyn.yourbiz') });
       $('show').scrollIntoView({ behavior: 'smooth', block: 'start' });
       $('preview').style.display = 'block';
       $('actions').style.display = 'flex';
