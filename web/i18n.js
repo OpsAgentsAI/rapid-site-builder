@@ -13,7 +13,8 @@
  *   data-i18n-aria="key"   → aria-label attribute
  *
  * Language is resolved (highest first): ?lang= → saved choice → host default
- * (a *-he. hostname or <html data-default-lang="he">) → navigator.language → en.
+ * (a *-he. hostname or <html data-default-lang="he">) → en. The canonical URL
+ * stays English; Hebrew has its own URL + the in-page switcher.
  * Hebrew copy is FEMININE throughout (house rule — the user is addressed as "את").
  */
 (function () {
@@ -197,7 +198,9 @@
     const host = (location.hostname || '');
     if (/(^|[.-])he($|[.-])/.test(host)) return 'he';                 // rapid-site-builder-he.web.app
     if ((document.documentElement.getAttribute('data-default-lang') || '') === 'he') return 'he';
-    try { if ((navigator.language || '').toLowerCase().indexOf('he') === 0) return 'he'; } catch (e) {}
+    // Predictable canonical URL: rapid-site-builder.web.app is English; the Hebrew
+    // version lives at its own URL (rapid-site-builder-he.web.app) + the switcher.
+    // (No navigator.language auto-flip — it made the canonical URL locale-dependent.)
     return 'en';
   }
 
