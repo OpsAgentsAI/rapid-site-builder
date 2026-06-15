@@ -1,13 +1,26 @@
 {
-  "hosting": {
-    "site": "rapid-site-builder",
-    "public": "web",
-    "ignore": ["**/.*"],
-    "rewrites": [
-      {
-        "source": "**",
-        "run": { "serviceId": "rapid-builder-proxy", "region": "us-central1" }
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "site": "rapid-site-builder",
+      "public": "web",
+      "ignore": ["**/.*"],
+      "rewrites": [
+        {
+          "source": "**",
+          "run": { "serviceId": "rapid-builder-proxy", "region": "us-central1" }
+        }
+      ]
+    },
+    {
+      "site": "rapid-site-builder-he",
+      "public": "web",
+      "ignore": ["**/.*"],
+      "rewrites": [
+        {
+          "source": "**",
+          "run": { "serviceId": "rapid-builder-proxy", "region": "us-central1" }
+        }
+      ]
+    }
+  ]
 }

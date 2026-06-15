@@ -63,7 +63,7 @@ jobs:
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
           npm install -g firebase-tools@13 >/dev/null 2>&1
-          firebase deploy --only "hosting:$HOSTING_SITE" --project "$PROJECT_ID" --non-interactive
+          firebase deploy --only hosting --project "$PROJECT_ID" --non-interactive   # deploys rapid-site-builder + rapid-site-builder-he (Hebrew default)
 
       - name: Smoke test Hosting
         run: |
