@@ -216,7 +216,7 @@
     root.querySelectorAll('[data-i18n-html]').forEach(function (el) { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
     root.querySelectorAll('[data-i18n-ph]').forEach(function (el) { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
     root.querySelectorAll('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria'))); });
-    if (root === document) document.title = t('doc.title');
+    if (root === document) { var tk = document.documentElement.getAttribute('data-i18n-title'); if (tk) document.title = t(tk); }
   }
 
   function setLang(next) {
