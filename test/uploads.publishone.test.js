@@ -41,7 +41,21 @@ Module._load = origLoad; // restore once the module graph is built
 // Drive the integration through the PUBLIC exported wrapper (prepareUserMedia →
 // publishOne); a dropped file yields an empty result + zero public writes.
 const VALID_NAME = 'uploads/20260611/0123456789abcdef01234567.png';
-const PNG_MAGIC = Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.from('IHDRxxxx')]);
+// A STRUCTURALLY-VALID PNG: passes both the magic-bytes gate (signature) AND the
+// stripPngMetadata chunk walk (IHDR…IEND), so it survives the full publish path
+// now that publishOne magic-sniffs AND metadata-strips every type.
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+function pngChunk(type, data) {
+  const d = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1');
+  const len = Buffer.alloc(4); len.writeUInt32BE(d.length);
+  return Buffer.concat([len, Buffer.from(type, 'latin1'), d, Buffer.from([0, 0, 0, 0])]);
+}
+const VALID_PNG = Buffer.concat([
+  PNG_SIG,
+  pngChunk('IHDR', Buffer.alloc(13, 7)),
+  pngChunk('IDAT', 'pixelbytes'),
+  pngChunk('IEND', Buffer.alloc(0))
+]);
 
 test('prepareUserMedia REJECTS HTML bytes declared as image/png — no result, no public write', async () => {
   saveCalls.length = 0;
@@ -54,8 +68,8 @@ test('prepareUserMedia REJECTS HTML bytes declared as image/png — no result, n
 
 test('prepareUserMedia PUBLISHES a real PNG — one result, exactly one public write with pinned Content-Type', async () => {
   saveCalls.length = 0;
-  SRC_META = { contentType: 'image/png', size: PNG_MAGIC.length };
-  SRC_BYTES = PNG_MAGIC;
+  SRC_META = { contentType: 'image/png', size: VALID_PNG.length };
+  SRC_BYTES = VALID_PNG;
   const out = await uploads.prepareUserMedia([VALID_NAME]);
   assert.strictEqual(out.length, 1, 'happy-path PNG must publish');
   assert.ok(out[0].url.includes('test-images-bucket') && out[0].url.includes('/user/'), 'served from the public bucket under user/');
