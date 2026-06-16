@@ -155,3 +155,141 @@ test('magicMatches enforces declared-type vs real-bytes agreement', () => {
   // cross-type spoof: a real PNG body declared as mp4 still mismatches
   assert.strictEqual(uploads.magicMatches(PNG_MAGIC, 'video/mp4'), false);
 });
+
+// ---- PNG metadata strip (card 4rF1bqG0) ----
+// Synthetic chunk: length(4) + type(4) + data + crc(4). The stripper keeps kept
+// chunks byte-for-byte, so the CRC field here is just a 4-byte filler.
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+function pngChunk(type, data) {
+  const d = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1');
+  const len = Buffer.alloc(4); len.writeUInt32BE(d.length);
+  return Buffer.concat([len, Buffer.from(type, 'latin1'), d, Buffer.from([0xDE, 0xAD, 0xBE, 0xEF])]);
+}
+test('stripPngMetadata drops eXIf/tEXt, keeps IHDR/IDAT/IEND', () => {
+  const png = Buffer.concat([
+    PNG_SIG,
+    pngChunk('IHDR', Buffer.alloc(13, 7)),
+    pngChunk('eXIf', 'SECRET-GPS-COORDS'),
+    pngChunk('tEXt', 'Author\0leaky-pii'),
+    pngChunk('IDAT', 'pixelbytes'),
+    pngChunk('IEND', Buffer.alloc(0))
+  ]);
+  const out = uploads.stripPngMetadata(png);
+  assert.ok(!out.includes(Buffer.from('SECRET-GPS-COORDS')), 'eXIf payload must be gone');
+  assert.ok(!out.includes(Buffer.from('leaky-pii')), 'tEXt payload must be gone');
+  assert.ok(out.includes(Buffer.from('IHDR')), 'IHDR must survive');
+  assert.ok(out.includes(Buffer.from('pixelbytes')), 'IDAT data must survive');
+  assert.ok(out.includes(Buffer.from('IEND')), 'IEND must survive');
+  assert.deepStrictEqual(out.subarray(0, 8), PNG_SIG);
+});
+test('stripPngMetadata rejects malformed PNG structure', () => {
+  assert.throws(() => uploads.stripPngMetadata(Buffer.from('not a png at all here')), /reject|unparseable|malformed/i);
+  // chunk length overruns the buffer
+  const overrun = Buffer.concat([PNG_SIG, Buffer.from([0x7F, 0xFF, 0xFF, 0xF0]), Buffer.from('IDAT'), Buffer.from('x')]);
+  assert.throws(() => uploads.stripPngMetadata(overrun), /reject|unparseable|malformed/i);
+  // valid IHDR but no IEND
+  const noEnd = Buffer.concat([PNG_SIG, pngChunk('IHDR', Buffer.alloc(13, 1)), pngChunk('IDAT', 'data')]);
+  assert.throws(() => uploads.stripPngMetadata(noEnd), /reject|unparseable|malformed/i);
+});
+
+// ---- WebP metadata strip (card 4rF1bqG0) ----
+function webpChunk(fourcc, data) {
+  const d = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1');
+  const sz = Buffer.alloc(4); sz.writeUInt32LE(d.length);
+  const pad = d.length & 1 ? Buffer.from([0]) : Buffer.alloc(0);
+  return Buffer.concat([Buffer.from(fourcc, 'latin1'), sz, d, pad]);
+}
+function buildWebp(chunks) {
+  const body = Buffer.concat(chunks);
+  const head = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP')]);
+  head.writeUInt32LE(body.length + 4, 4);
+  return Buffer.concat([head, body]);
+}
+test('stripWebpMetadata drops EXIF/XMP, keeps VP8, rewrites RIFF size', () => {
+  const webp = buildWebp([
+    webpChunk('VP8 ', 'realimagepayload'),
+    webpChunk('EXIF', 'SECRET-GPS-COORDS'),
+    webpChunk('XMP ', '<x:xmpmeta>pii</x:xmpmeta>')
+  ]);
+  const out = uploads.stripWebpMetadata(webp);
+  assert.ok(!out.includes(Buffer.from('SECRET-GPS-COORDS')), 'EXIF payload must be gone');
+  assert.ok(!out.includes(Buffer.from('xmpmeta')), 'XMP payload must be gone');
+  assert.ok(out.includes(Buffer.from('VP8 ')), 'VP8 chunk must survive');
+  assert.ok(out.includes(Buffer.from('realimagepayload')), 'VP8 data must survive');
+  assert.strictEqual(out.toString('latin1', 0, 4), 'RIFF');
+  assert.strictEqual(out.toString('latin1', 8, 12), 'WEBP');
+  // rewritten RIFF size must equal the actual trailing byte count
+  assert.strictEqual(out.readUInt32LE(4), out.length - 8);
+});
+test('stripWebpMetadata rejects malformed WebP structure', () => {
+  assert.throws(() => uploads.stripWebpMetadata(Buffer.from('RIFFxxxxNOTWEBP!!')), /reject|unparseable|malformed/i);
+  assert.throws(() => uploads.stripWebpMetadata(Buffer.from('tooshort')), /reject|unparseable|malformed/i);
+  // a chunk whose declared size overruns the RIFF payload must be rejected:
+  // hand-build VP8 with a bogus oversized size field, then wrap in a valid RIFF
+  const bogusChunk = Buffer.concat([Buffer.from('VP8 '), (() => { const s = Buffer.alloc(4); s.writeUInt32LE(0xFFFFFF); return s; })(), Buffer.from('ab')]);
+  const bad = buildWebp([bogusChunk]);
+  assert.throws(() => uploads.stripWebpMetadata(bad), /reject|unparseable|malformed/i);
+});
+
+// ---- MP4 metadata strip (card 4rF1bqG0) ----
+function mp4box(type, body) {
+  const b = Buffer.isBuffer(body) ? body : Buffer.from(body, 'latin1');
+  const head = Buffer.alloc(8); head.writeUInt32BE(b.length + 8); head.write(type, 4, 'latin1');
+  return Buffer.concat([head, b]);
+}
+test('stripMp4Metadata removes moov>udta GPS, keeps moov/mdat', () => {
+  const udta = mp4box('udta', mp4box('\xA9xyz', '+37.7-122.4/SECRET-GPS-COORDS'));
+  const mvhd = mp4box('mvhd', Buffer.alloc(20, 3));
+  const moov = mp4box('moov', Buffer.concat([mvhd, udta]));
+  const mdat = mp4box('mdat', 'rawvideopayload');
+  const ftyp = mp4box('ftyp', 'mp42mp42');
+  const mp4 = Buffer.concat([ftyp, moov, mdat]);
+
+  const out = uploads.stripMp4Metadata(mp4);
+  assert.ok(!out.includes(Buffer.from('SECRET-GPS-COORDS')), 'udta GPS payload must be gone');
+  assert.ok(!out.includes(Buffer.from('xyz')), 'udta child box must be gone');
+  assert.ok(out.includes(Buffer.from('mvhd')), 'mvhd must survive inside moov');
+  assert.ok(out.includes(Buffer.from('mdat')), 'mdat must survive');
+  assert.ok(out.includes(Buffer.from('rawvideopayload')), 'mdat data must survive');
+  assert.ok(out.includes(Buffer.from('moov')), 'moov must survive');
+  // moov box size must be rewritten to match its new (smaller) body
+  const moovIdx = out.indexOf(Buffer.from('moov')) - 4;
+  const moovSize = out.readUInt32BE(moovIdx);
+  assert.ok(moovSize < moov.length, 'rewritten moov must be smaller than the original');
+});
+test('stripMp4Metadata removes iOS moov>meta ISO6709 GPS, keeps mvhd/mdat', () => {
+  // iPhone capture writes location to com.apple.quicktime.location.ISO6709
+  // inside a `meta` box that is a direct child of moov (sibling of udta).
+  const meta = mp4box('meta', mp4box('ilst', '\xA9xyz+37.7749-122.4194/SECRET-IOS-GPS'));
+  const mvhd = mp4box('mvhd', Buffer.alloc(20, 3));
+  const moov = mp4box('moov', Buffer.concat([mvhd, meta]));
+  const mdat = mp4box('mdat', 'rawvideopayload');
+  const ftyp = mp4box('ftyp', 'mp42mp42');
+  const mp4 = Buffer.concat([ftyp, moov, mdat]);
+
+  const out = uploads.stripMp4Metadata(mp4);
+  assert.ok(!out.includes(Buffer.from('SECRET-IOS-GPS')), 'iOS moov>meta GPS payload must be gone');
+  assert.ok(!out.includes(Buffer.from('ilst')), 'moov>meta child box must be gone');
+  assert.ok(out.includes(Buffer.from('mvhd')), 'mvhd must survive inside moov');
+  assert.ok(out.includes(Buffer.from('mdat')), 'mdat must survive');
+  assert.ok(out.includes(Buffer.from('rawvideopayload')), 'mdat data must survive');
+  assert.ok(out.includes(Buffer.from('moov')), 'moov must survive');
+});
+test('stripMp4Metadata handles 64-bit box sizes', () => {
+  // ftyp with the 64-bit largesize form (size field == 1, real size in next 8B)
+  const body = Buffer.from('mp42mp42');
+  const head = Buffer.alloc(16);
+  head.writeUInt32BE(1, 0); head.write('ftyp', 4, 'latin1');
+  head.writeUInt32BE(0, 8); head.writeUInt32BE(body.length + 16, 12);
+  const ftyp64 = Buffer.concat([head, body]);
+  const mdat = mp4box('mdat', 'video');
+  const out = uploads.stripMp4Metadata(Buffer.concat([ftyp64, mdat]));
+  assert.ok(out.includes(Buffer.from('ftyp')), 'ftyp must survive');
+  assert.ok(out.includes(Buffer.from('mdat')), 'mdat must survive');
+});
+test('stripMp4Metadata rejects malformed MP4 structure', () => {
+  assert.throws(() => uploads.stripMp4Metadata(Buffer.from([0, 1, 2])), /reject|unparseable|malformed/i);
+  // box claims a size far past the buffer end
+  const overrun = Buffer.concat([(() => { const h = Buffer.alloc(8); h.writeUInt32BE(0x7FFFFFFF); h.write('ftyp', 4, 'latin1'); return h; })(), Buffer.from('xx')]);
+  assert.throws(() => uploads.stripMp4Metadata(overrun), /reject|unparseable|malformed/i);
+});
