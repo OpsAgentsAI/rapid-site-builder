@@ -1,0 +1,99 @@
+name: Deploy Real App (auth-ON, separate surface)
+
+# The REAL-APP surface for Rapid Site Builder — login-gated Publish + per-user
+# My Sites (card VI673sym). Michal's guardrail (2026-06-16): "login gate should
+# be different branch different url so hackathon url stay unrated." So this lives
+# on the `real-app` branch + a SEPARATE URL and is NEVER deployed from `main`:
+#   • Hackathon surface  → main → deploy.yml → rapid-builder-proxy → rapid-site-builder.web.app  (auth OFF, untouched)
+#   • Real-app surface   → real-app branch → THIS workflow → rapid-builder-app → rapid-site-builder-app.web.app (auth ON)
+#
+# workflow_dispatch ONLY (no push trigger): pushing this branch must never
+# auto-stand-up a new prod surface. A human/devops dispatches it deliberately.
+#
+# ── One-time prerequisites before the FIRST dispatch (devops, ~1 min) ────────
+#   1. Create the Hosting site:  firebase hosting:sites:create rapid-site-builder-app --project opsagent-staging
+#   2. Add it as an authorizedDomain for Google sign-in on opsagent-staging
+#      (Identity Platform): rapid-site-builder-app.web.app
+#   3. Confirm the runtime SA can read the secret:
+#      gcloud secrets add-iam-policy-binding rapid-builder-session-secret \
+#        --member="serviceAccount:<RUN_SERVICE_ACCOUNT>" --role=roles/secretmanager.secretAccessor --project <PROJECT_ID>
+#   (Phase-1 prereqs already in place per card VI673sym: rapid-builder-session-secret,
+#    GH secret FIREBASE_API_KEY, Google IdP enabled.)
+# Final gate is operator-only: one real Google sign-in QA (the "verify it's you"
+# wall can't be driven headlessly).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-realapp
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  SERVICE: rapid-builder-app
+  HOSTING_SITE: rapid-site-builder-app
+  APP_URL: https://rapid-site-builder-app.web.app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # checkout MUST precede auth: checkout(clean:true) would wipe the
+      # gha-creds-*.json that auth writes into the workspace.
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Cloud Run (auth ON)
+        run: |
+          # Full canonical env set (rule #20: --set-env-vars REPLACES, so the list
+          # must be complete) = the hackathon set PLUS the three auth vars that flip
+          # AUTH_ENABLED on (FIREBASE_PROJECT_ID + FIREBASE_API_KEY + SESSION_SECRET;
+          # FIREBASE_AUTH_DOMAIN defaults to <project>.firebaseapp.com but we pin the
+          # app domain). SESSION_SECRET comes from Secret Manager, never an env literal.
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
+            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=global,IMAGE_MODEL=gemini-3-pro-image-preview,WARM_KEY=${{ secrets.WARM_KEY }},FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},FIREBASE_AUTH_DOMAIN=rapid-site-builder-app.web.app,PUBLIC_BASE_URL=https://rapid-site-builder-app.web.app,ALLOWED_ORIGINS=https://rapid-site-builder-app.web.app" \
+            --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
+            --quiet
+          # deploy does not promote traffic when a pin exists — promote explicitly
+          gcloud run services update-traffic "$SERVICE" --to-latest \
+            --project "$PROJECT_ID" --region "$REGION" --quiet
+
+      - name: Smoke test Cloud Run (expect auth ON)
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          echo "Service URL: $URL"
+          curl -sf "$URL/api/health" | tee /tmp/health.json
+          grep -q '"agentEngine":true' /tmp/health.json
+          # the real-app surface MUST report auth enabled (fail-closed safety net:
+          # a deploy that silently lost the auth env would otherwise publish ungated)
+          grep -q '"auth":true' /tmp/health.json
+
+      - name: Deploy Firebase Hosting (separate site)
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
+          npm install -g firebase-tools@13 >/dev/null 2>&1
+          firebase deploy --only "hosting:$HOSTING_SITE" --project "$PROJECT_ID" --non-interactive
+
+      - name: Smoke test Hosting
+        run: |
+          sleep 5
+          curl -sf -o /dev/null -w "hosting: %{http_code}\n" "$APP_URL/api/health"

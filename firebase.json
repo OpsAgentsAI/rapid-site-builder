@@ -21,6 +21,17 @@
           "run": { "serviceId": "rapid-builder-proxy", "region": "us-central1" }
         }
       ]
+    },
+    {
+      "site": "rapid-site-builder-app",
+      "public": "web",
+      "ignore": ["**/.*"],
+      "rewrites": [
+        {
+          "source": "**",
+          "run": { "serviceId": "rapid-builder-app", "region": "us-central1" }
+        }
+      ]
     }
   ]
 }
