@@ -369,7 +369,7 @@
         ${isLive || res ? '' : `<span class="sample">${esc(T('board.tag.sample'))}</span>`}
       </article>`;
     });
-    $('grid').innerHTML = cards.join('') + '<div class="grid-empty" id="grid-empty">No agents match this filter.</div>';
+    $('grid').innerHTML = cards.join('') + `<div class="grid-empty" id="grid-empty">${esc(T('board.filter.empty'))}</div>`;
     // CRITICAL: re-attach the in-card approve/reject gate handlers on every
     // re-render — filtering and dragging both re-render, and dropping this wiring
     // would silently break the Uri approval gate.
