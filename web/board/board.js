@@ -11,6 +11,19 @@
   const RAW_API = '__API_BASE__';
   const API = RAW_API.startsWith('http') ? RAW_API : '';
   const $ = (id) => document.getElementById(id);
+
+  // i18n bridge — the shared engine (web/i18n.js) owns the dictionaries, <html
+  // lang/dir>, and static-string apply(). Here we localize the strings this
+  // script builds at runtime. T() falls back to the key if the engine is absent
+  // (e.g. a stripped deploy) so the board never renders an empty bubble.
+  const T = (k, v) => (window.RSB_I18N ? RSB_I18N.t(k, v) : k);
+  // UI language is whatever the shared engine resolved (?lang= → saved → host).
+  // T() already reads it, so no separate copy is kept; setLang() reloads with the
+  // chosen ?lang= so every runtime string below re-renders in the new language.
+  // Wire the in-page language switcher (same component as the landing page).
+  if ($('langbtn') && window.RSB_I18N) {
+    $('langbtn').addEventListener('click', () => RSB_I18N.setLang(RSB_I18N.lang === 'he' ? 'en' : 'he'));
+  }
   const state = (() => {
     try { return JSON.parse(sessionStorage.getItem('operate_state') || 'null'); } catch { return null; }
   })();
@@ -50,7 +63,21 @@
       feed: ['TLS chain verified', 'auto-renew armed'] }
   ];
 
-  const STATUS_LABEL = { healthy: 'Healthy', working: 'Working', stuck: 'Needs approval', idle: 'Idle' };
+  // Status pill labels, resolved through the engine each call so a language
+  // switch repaints correctly. Keys mirror i18n.js board.status.*.
+  const statusLabel = (s) => T('board.status.' + s);
+
+  // ---- runtime-string localizers for ROSTER content ----
+  // ROSTER keeps stable id/name/emoji/color + English literals as t() fallbacks.
+  // role/sample/metric-label/feed lines resolve through board.* keys keyed by id.
+  const tRole = (a) => T('board.role.' + a.id, undefined) !== ('board.role.' + a.id) ? T('board.role.' + a.id) : a.role;
+  const tSample = (a) => (a.sample ? (T('board.sample.' + a.id) !== ('board.sample.' + a.id) ? T('board.sample.' + a.id) : a.sample) : a.sample);
+  const tMetricLabel = (a) => (a.metric ? (T('board.mlabel.' + a.id) !== ('board.mlabel.' + a.id) ? T('board.mlabel.' + a.id) : a.metric.label) : '');
+  const tFeed = (a) => (a.feed || []).map((line, i) => {
+    const key = 'board.feed.' + a.id + '.' + i;
+    const got = T(key);
+    return got !== key ? got : line;
+  });
 
   // One-line function/responsibility per agent for the drill-in panel. Kept in a
   // separate const (not merged into ROSTER) so the panel stays purely additive
@@ -149,10 +176,15 @@
     const ran = live ? (state.agentsRan || []).filter(a => a !== 'orchestrator') : [];
 
     if (live) {
-      $('theo-say').innerHTML = `Welcome back. <b>${esc(business || 'Your site')}</b> is live and healthy — my team of ${Math.max(ran.length, 5)} agents built it and now keeps it running. You don’t need to do anything; I’ll only ask when a decision is truly yours.`;
+      $('theo-say').innerHTML = T('board.theo.live', {
+        business: esc(business || T('board.theo.yoursite')),
+        n: String(Math.max(ran.length, 5))
+      });
     } else {
       // Reduced welcome only: the rich agentsRan view stays same-session.
-      $('theo-say').innerHTML = `Welcome back — <b>${esc(business || 'your site')}</b> is live. My team keeps it monitored, updated, and secure; I’ll only ask you when a decision is truly yours.`;
+      $('theo-say').innerHTML = T('board.theo.reduced', {
+        business: esc(business || T('board.theo.yourbiz'))
+      });
     }
 
     $('site-chip').style.display = 'flex';
@@ -161,19 +193,19 @@
     const shot = $('shot');
     shot.classList.remove('empty');
     shot.innerHTML = safeUrl
-      ? `<iframe src="${esc(safeUrl)}" sandbox title="Live site preview" loading="lazy"></iframe><a class="open" href="${esc(safeUrl)}" target="_blank" rel="noopener">Open site</a>`
-      : '<span>No preview available for this site.</span>';
+      ? `<iframe src="${esc(safeUrl)}" sandbox title="${esc(T('board.shot.previewtitle'))}" loading="lazy"></iframe><a class="open" href="${esc(safeUrl)}" target="_blank" rel="noopener">${esc(T('board.shot.open'))}</a>`
+      : `<span>${esc(T('board.shot.nopreview'))}</span>`;
 
     const stats = [];
     if (live) {
-      if (ran.length) stats.push([String(ran.length), 'agents on the job']);
-      if (state.seoScore) stats.push([String(state.seoScore), 'SEO score · Sam']);
-      if ((state.agentsRan || []).includes('phoenix')) stats.push(['Traced', 'run logged · Arize']);
-      stats.push(['Live', 'shipped to the web']);
+      if (ran.length) stats.push([String(ran.length), T('board.stat.agents')]);
+      if (state.seoScore) stats.push([String(state.seoScore), T('board.stat.seo')]);
+      if ((state.agentsRan || []).includes('phoenix')) stats.push([T('board.stat.traced.v'), T('board.stat.traced.l')]);
+      stats.push([T('board.stat.live.v'), T('board.stat.live.l')]);
     } else if (safeUrl) {
       // A non-session My-Sites entry has no live agentsRan/seoScore — show only
       // the honest "it's live" stat, never a fabricated agent count (STD D4).
-      stats.push(['Live', 'shipped to the web']);
+      stats.push([T('board.stat.live.v'), T('board.stat.live.l')]);
     }
     $('stats').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join('');
 
@@ -186,10 +218,10 @@
       return;
     }
     needs.style.display = 'flex';
-    $('needs-tx').innerHTML = '<b>One decision waits for you</b> — Uri proposes a core update (sample item). Everything else is handled.';
+    $('needs-tx').innerHTML = T('board.needs.tx');
     $('needs-later').onclick = () => { needs.style.display = 'none'; };
     $('needs-ok').onclick = () => {
-      $('needs-tx').innerHTML = 'Approved — Uri is on it. That’s all you needed to do.';
+      $('needs-tx').innerHTML = T('board.needs.approved');
       $('needs-ok').style.display = 'none'; $('needs-later').style.display = 'none';
       resolved.uri = 'approved'; renderTeam();
       setTimeout(() => { needs.style.display = 'none'; }, 3500);
@@ -208,7 +240,7 @@
       selectedId = mine.id || null;
       paintHero({ id: mine.id, business: mine.business, url: mine.url }, false);
     } else {
-      $('theo-say').textContent = 'Hi, I’m Theo. Once you build and publish a site, my team takes over the day-to-day — monitoring, updates, security — and I report here in plain language.';
+      $('theo-say').textContent = T('board.theo.intro');
       $('stats').innerHTML = '';
       $('needs').style.display = 'none';
     }
@@ -295,20 +327,20 @@
 
       if (isLive) {
         status = 'healthy';
-        last = lastBy[a.id] || 'Acted in your last build';
-        tag = `<span class="live-tag"><i></i>LIVE</span>`;
+        last = lastBy[a.id] || T('board.last.acted');
+        tag = `<span class="live-tag"><i></i>${esc(T('board.live'))}</span>`;
         feed = feedBy[a.id] || [];
-        if (a.id === 'sam' && state && state.seoScore) metric = { value: String(state.seoScore), label: 'SEO score · your site' };
-        if (a.id === 'max' && state && state.url) metric = { value: 'Live', label: 'shipped to the web' };
-        if (a.id === 'phoenix') metric = { value: 'Traced', label: 'run logged · Arize' };
+        if (a.id === 'sam' && state && state.seoScore) metric = { value: String(state.seoScore), label: T('board.metric.seo') };
+        if (a.id === 'max' && state && state.url) metric = { value: T('board.stat.live.v'), label: T('board.metric.shipped') };
+        if (a.id === 'phoenix') metric = { value: T('board.stat.traced.v'), label: T('board.stat.traced.l') };
       } else {
         status = res === 'approved' ? 'healthy' : res === 'rejected' ? 'idle' : (a.status || 'idle');
-        last = res === 'approved' ? 'Approved — on it'
-             : res === 'rejected' ? 'Rejected — staying as is'
-             : (a.sample || 'Handled automatically — nothing for you to do.');
+        last = res === 'approved' ? T('board.last.approved')
+             : res === 'rejected' ? T('board.last.rejected')
+             : (tSample(a) || T('board.last.auto'));
         tag = '';
-        feed = a.feed || [];
-        if (a.metric && !res) metric = a.metric;
+        feed = tFeed(a);
+        if (a.metric && !res) metric = { value: a.metric.value, label: tMetricLabel(a) };
         needsApproval = a.needsApproval && !res;
       }
 
@@ -321,19 +353,20 @@
       // Convoy merge (board-refinement, rule #18): Dash-B drill-in attrs
       // (data-agent/tabindex/role/aria-label) + Dash-C drag/filter attrs
       // (draggable/data-id/data-fstatus/data-name/data-role) on one card.
-      return `<article class="card" draggable="true" data-agent="${a.id}" data-id="${esc(a.id)}" data-fstatus="${esc(fstatus)}" data-name="${esc(a.name)}" data-role="${esc(a.role)}" tabindex="0" role="button" aria-label="${esc(a.name)} — ${esc(a.role)}, open details" style="--hue:var(--agent-${a.color})">
+      const role = tRole(a);
+      return `<article class="card" draggable="true" data-agent="${a.id}" data-id="${esc(a.id)}" data-fstatus="${esc(fstatus)}" data-name="${esc(a.name)}" data-role="${esc(role)}" tabindex="0" role="button" aria-label="${esc(T('board.card.aria', { name: a.name, role: role }))}" style="--hue:var(--agent-${a.color})">
         <span class="bar" aria-hidden="true"></span>
-        <button type="button" class="drag" aria-label="Reorder ${esc(a.name)}" title="Drag to reorder"><i></i><i></i><i></i></button>
+        <button type="button" class="drag" aria-label="${esc(T('board.drag.aria', { name: a.name }))}" title="${esc(T('board.drag.title'))}"><i></i><i></i><i></i></button>
         <header>
           <span class="av${status === 'working' ? ' bob' : ''}"><span class="face"><img alt="" loading="lazy" src="${face(a.name)}"/></span><span class="role-badge" aria-hidden="true">${a.emoji}</span></span>
-          <div class="meta"><div class="nm">${esc(a.name)} ${tag}</div><div class="rl">${esc(a.role)}</div></div>
-          <span class="pill ${status}">${STATUS_LABEL[status]}</span>
+          <div class="meta"><div class="nm">${esc(a.name)} ${tag}</div><div class="rl">${esc(role)}</div></div>
+          <span class="pill ${status}">${statusLabel(status)}</span>
         </header>
         <p class="last">${esc(last)}</p>
         ${metric ? `<div class="metric"><b>${esc(metric.value)}</b><span>${esc(metric.label)}</span></div>` : ''}
         ${feed.length ? `<ul class="cfeed">${feed.slice(0, 3).map(l => `<li><i>▸</i><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
-        ${showGate ? `<div class="gate"><span class="g-label">✋ Human approval</span><button class="rej" data-act="reject" data-id="${esc(a.id)}">Reject</button><button class="app" data-act="approve" data-id="${esc(a.id)}">Approve</button></div>` : ''}
-        ${isLive || res ? '' : `<span class="sample">sample</span>`}
+        ${showGate ? `<div class="gate"><span class="g-label">✋ ${esc(T('board.gate.label'))}</span><button class="rej" data-act="reject" data-id="${esc(a.id)}">${esc(T('board.gate.reject'))}</button><button class="app" data-act="approve" data-id="${esc(a.id)}">${esc(T('board.gate.approve'))}</button></div>` : ''}
+        ${isLive || res ? '' : `<span class="sample">${esc(T('board.tag.sample'))}</span>`}
       </article>`;
     });
     $('grid').innerHTML = cards.join('') + '<div class="grid-empty" id="grid-empty">No agents match this filter.</div>';
@@ -518,14 +551,14 @@
     let status, last, feed;
     if (isLive) {
       status = 'healthy';
-      last = lastBy[a.id] || 'Acted in your last build';
+      last = lastBy[a.id] || T('board.last.acted');
       feed = feedBy[a.id] || [];
     } else {
       status = res === 'approved' ? 'healthy' : res === 'rejected' ? 'idle' : (a.status || 'idle');
-      last = res === 'approved' ? 'Approved — on it'
-           : res === 'rejected' ? 'Rejected — staying as is'
-           : (a.sample || 'Handled automatically — nothing for you to do.');
-      feed = a.feed || [];
+      last = res === 'approved' ? T('board.last.approved')
+           : res === 'rejected' ? T('board.last.rejected')
+           : (tSample(a) || T('board.last.auto'));
+      feed = tFeed(a);
     }
     return { isLive, status, last, feed };
   }
@@ -534,27 +567,28 @@
     const a = ROSTER.find(x => x.id === id);
     if (!a) return;
     const v = agentView(a);
+    const role = tRole(a);
     const tag = v.isLive
-      ? '<span class="live-tag"><i></i>LIVE</span>'
-      : '<span class="sample">sample</span>';
-    const fn = FN[a.id] || a.role;
+      ? `<span class="live-tag"><i></i>${esc(T('board.live'))}</span>`
+      : `<span class="sample">${esc(T('board.tag.sample'))}</span>`;
+    const fn = (T('board.fn.' + a.id) !== ('board.fn.' + a.id)) ? T('board.fn.' + a.id) : (FN[a.id] || role);
     const feedHtml = v.feed.length
-      ? `<div class="drill-feed-h">${v.isLive ? 'Recent activity' : 'Sample activity'}</div>
+      ? `<div class="drill-feed-h">${esc(v.isLive ? T('board.drill.recent') : T('board.drill.sample'))}</div>
          <ul class="drill-feed">${v.feed.map(l => `<li><i>▸</i><span>${esc(l)}</span></li>`).join('')}</ul>`
-      : '<div class="drill-empty">No recent activity lines for this agent yet.</div>';
+      : `<div class="drill-empty">${esc(T('board.drill.noactivity'))}</div>`;
 
     $('drill-body').innerHTML = `
       <div class="drill-head" style="--hue:var(--agent-${a.color})">
         <span class="av"><span class="face"><img alt="" src="${face(a.name)}"/></span><span class="role-badge" aria-hidden="true">${a.emoji}</span></span>
-        <div class="meta"><div class="nm" id="drill-name">${esc(a.name)} ${tag}</div><div class="rl">${esc(a.role)}</div></div>
-        <span class="pill ${v.status}">${STATUS_LABEL[v.status]}</span>
+        <div class="meta"><div class="nm" id="drill-name">${esc(a.name)} ${tag}</div><div class="rl">${esc(role)}</div></div>
+        <span class="pill ${v.status}">${statusLabel(v.status)}</span>
       </div>
       <p class="drill-fn">${esc(fn)}</p>
       <div class="drill-rows">
-        <div class="drill-row"><span class="k">Status</span><span class="v">${STATUS_LABEL[v.status]}</span></div>
-        <div class="drill-row"><span class="k">Function</span><span class="v">${esc(a.role)}</span></div>
-        <div class="drill-row"><span class="k">Source</span><span class="v">${v.isLive ? 'LIVE — acted in your last build' : 'SAMPLE — illustrative, no run this session'}</span></div>
-        <div class="drill-row"><span class="k">Last activity</span><span class="v">${esc(v.last)}</span></div>
+        <div class="drill-row"><span class="k">${esc(T('board.drill.k.status'))}</span><span class="v">${statusLabel(v.status)}</span></div>
+        <div class="drill-row"><span class="k">${esc(T('board.drill.k.function'))}</span><span class="v">${esc(role)}</span></div>
+        <div class="drill-row"><span class="k">${esc(T('board.drill.k.source'))}</span><span class="v">${esc(v.isLive ? T('board.drill.src.live') : T('board.drill.src.sample'))}</span></div>
+        <div class="drill-row"><span class="k">${esc(T('board.drill.k.last'))}</span><span class="v">${esc(v.last)}</span></div>
       </div>
       ${feedHtml}`;
 
@@ -606,7 +640,7 @@
     const btn = $('ask-go'), reply = $('ask-reply');
     btn.disabled = true;
     reply.style.display = 'block';
-    reply.textContent = 'Theo is thinking…';
+    reply.textContent = T('board.ask.thinking');
     try {
       const r = await fetch(API + '/api/ask', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -622,7 +656,7 @@
       if (!r.ok) throw new Error(j.error || 'ask failed');
       reply.textContent = j.reply || '…';
     } catch {
-      reply.textContent = 'Couldn’t reach Theo right now — try again in a moment.';
+      reply.textContent = T('board.ask.err');
     } finally {
       btn.disabled = false;
     }
@@ -672,13 +706,13 @@
       } catch { /* keep the device list painted above */ }
       if (acct.length) { mySites = acct; paintMySites(acct); renderSwitcher(); }
       $('mysites').style.display = 'block';
-      $('mysites-label').textContent = 'on your account';
-      $('mysites-acct').innerHTML = `<span>${esc(cfg.me.email || 'signed in')}</span><button id="acct-out" style="${ACCT_BTN}">Sign out</button>`;
+      $('mysites-label').textContent = T('board.mysites.label.account');
+      $('mysites-acct').innerHTML = `<span>${esc(cfg.me.email || T('board.mysites.signedin'))}</span><button id="acct-out" style="${ACCT_BTN}">${esc(T('board.mysites.signout'))}</button>`;
       $('acct-out').addEventListener('click', () => RSB_AUTH.signOut().then(() => location.reload()));
     } else {
       // signed out on an auth-on deploy: invite sign-in (device list stays painted).
       $('mysites').style.display = 'block';
-      $('mysites-acct').innerHTML = `<button id="acct-in" style="${ACCT_BTN}">Sign in — see your sites on any device</button>`;
+      $('mysites-acct').innerHTML = `<button id="acct-in" style="${ACCT_BTN}">${esc(T('board.mysites.signin'))}</button>`;
       $('acct-in').addEventListener('click', () =>
         RSB_AUTH.signIn().then(() => renderMySites()).catch(() => { /* user closed the popup */ }));
     }
