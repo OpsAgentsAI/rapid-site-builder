@@ -120,3 +120,38 @@ test('lengthRangeFor binds the signature to the declared size, capped at the typ
   assert.strictEqual(uploads.lengthRangeFor('image/jpeg', 15 * 1024 * 1024), `0,${15 * 1024 * 1024}`);
   assert.strictEqual(uploads.lengthRangeFor('video/mp4', 10 ** 12), `0,${100 * 1024 * 1024}`);
 });
+
+// --- magic-bytes MIME sniff (card 4cxGFuqh) ---
+// Real headers per format; pad past the 12-byte minimum the sniffer needs.
+const PNG_MAGIC = Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.from('IHDRxxxx')]);
+const WEBP_MAGIC = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0x10, 0x00, 0x00, 0x00]), Buffer.from('WEBPVP8 ')]);
+const MP4_MAGIC = Buffer.concat([Buffer.from([0x00, 0x00, 0x00, 0x18]), Buffer.from('ftyp'), Buffer.from('mp42mp42')]);
+const JPEG_MAGIC = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01]);
+
+test('sniffType detects real magic bytes for each whitelisted format', () => {
+  assert.strictEqual(uploads.sniffType(PNG_MAGIC), 'image/png');
+  assert.strictEqual(uploads.sniffType(WEBP_MAGIC), 'image/webp');
+  assert.strictEqual(uploads.sniffType(MP4_MAGIC), 'video/mp4');
+  assert.strictEqual(uploads.sniffType(JPEG_MAGIC), 'image/jpeg');
+});
+
+test('sniffType returns null for spoofed / non-media bytes', () => {
+  assert.strictEqual(uploads.sniffType(Buffer.from('<html><script>alert(1)</script>')), null);
+  assert.strictEqual(uploads.sniffType(Buffer.from('GIF89a............')), null);
+  assert.strictEqual(uploads.sniffType(Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])), null);
+  assert.strictEqual(uploads.sniffType(Buffer.alloc(4)), null);   // too short
+  assert.strictEqual(uploads.sniffType('not a buffer'), null);
+  // "RIFF" container that is NOT WebP (e.g. WAV) must not pass as webp
+  assert.strictEqual(uploads.sniffType(Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WAVEfmt ')])), null);
+});
+
+test('magicMatches enforces declared-type vs real-bytes agreement', () => {
+  assert.strictEqual(uploads.magicMatches(PNG_MAGIC, 'image/png'), true);
+  assert.strictEqual(uploads.magicMatches(WEBP_MAGIC, 'image/webp'), true);
+  assert.strictEqual(uploads.magicMatches(MP4_MAGIC, 'video/mp4'), true);
+  assert.strictEqual(uploads.magicMatches(JPEG_MAGIC, 'image/jpeg'), true);
+  // spoof: HTML body declared as image/png is rejected
+  assert.strictEqual(uploads.magicMatches(Buffer.from('<html>this is not a png at all!!!</html>'), 'image/png'), false);
+  // cross-type spoof: a real PNG body declared as mp4 still mismatches
+  assert.strictEqual(uploads.magicMatches(PNG_MAGIC, 'video/mp4'), false);
+});
