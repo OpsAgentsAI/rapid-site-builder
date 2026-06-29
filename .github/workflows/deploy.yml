@@ -61,18 +61,23 @@ jobs:
           curl -sf "$URL/api/health" | tee /tmp/health.json
           grep -q '"agentEngine":true' /tmp/health.json
 
-      - name: Deploy Firebase Hosting
+      - name: Deploy Firebase Hosting via Cloud Build (native metadata ADC)
         run: |
-          # Bake the Cloud Run URL into the static pages: long SSE builds must
-          # bypass the Hosting proxy (it caps streaming responses ~60s).
+          # Bake the Cloud Run URL into the static pages (long SSE builds bypass the
+          # Hosting proxy 60s cap), THEN ship the baked source to Cloud Build.
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
-          # firebase-tools PINNED: the floating @13 resolved to 13.35.1 (Mar 2025),
-          # whose google-auth-library no longer authenticates the WIF external_account
-          # ADC flow ("Failed to authenticate, have you run firebase login?"). 15.21.0
-          # carries current WIF/ADC support and keeps us keyless (no SA-key secret).
-          npm install -g firebase-tools@15.21.0 >/dev/null 2>&1
-          firebase deploy --only hosting --project "$PROJECT_ID" --non-interactive   # deploys rapid-site-builder + rapid-site-builder-he (Hebrew default)
+          # firebase-tools (Node google-auth) CANNOT consume the WIF external_account
+          # credential on a GitHub-hosted runner — it fails "Failed to authenticate"
+          # DETERMINISTICALLY (gcloud/curl mint tokens from the same runner fine; only the
+          # Node CLIs fail). So gcloud (WIF works on the runner) submits a Cloud Build that
+          # runs the hosting deploy INSIDE GCP via metadata-server ADC — the failure class
+          # disappears. Mirrors OpsAgentsAI/msapps-lead-pipeline (card 7RuzMRm0). Build runs
+          # as gha-deployer@opsagent-staging (firebase.admin); see cloudbuild-hosting.yaml.
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
 
       - name: Smoke test Hosting
         run: |
