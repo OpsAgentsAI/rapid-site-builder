@@ -86,3 +86,57 @@ test('locationFromResource parses /locations/<x>/ and is empty on garbage', () =
   assert.strictEqual(locationFromResource(RES), 'europe-west4');
   assert.strictEqual(locationFromResource('garbage'), '');
 });
+
+// ---- card 5SaR6sZV: wrong-typed (but valid-JSON) TENANT_PROVIDER_CONFIG -----
+// engine.js / images.js call resolveProviderConfig() at module load, so a
+// non-string leaf reaching a later .trim() crashes the server on boot. These
+// pin the fail-safe: never throw, coerce scalars, drop non-scalars to managed.
+
+test('numeric TENANT_PROVIDER_CONFIG leaf never throws and is coerced to a string', () => {
+  const env = { TENANT_PROVIDER_CONFIG: JSON.stringify({ agentEngine: { resource: 12345 } }) };
+  let c;
+  assert.doesNotThrow(() => { c = resolveProviderConfig(undefined, env); });
+  assert.strictEqual(typeof c.agentEngine.resource, 'string');
+  assert.strictEqual(c.agentEngine.resource, '12345'); // coerced, not crashed
+});
+
+test('object/array leaves collapse to managed instead of crashing', () => {
+  const env = {
+    AGENT_ENGINE_RESOURCE: RES,
+    TENANT_PROVIDER_CONFIG: JSON.stringify({
+      agentEngine: { resource: { nested: 'oops' } },   // object leaf → dropped
+      image: { project: ['arr'], region: 7 },          // array dropped, number coerced
+    }),
+  };
+  let c;
+  assert.doesNotThrow(() => { c = resolveProviderConfig(undefined, env); });
+  assert.strictEqual(c.agentEngine.resource, RES); // bad BYOK leaf dropped → managed
+  assert.strictEqual(c.image.region, '7');         // number coerced
+  assert.ok(typeof c.image.project === 'string');  // array dropped → managed default ('')
+});
+
+test('a whole non-object TENANT_PROVIDER_CONFIG (JSON array/number) is ignored, not trusted', () => {
+  for (const bad of ['[1,2,3]', '42', '"a string"', 'null']) {
+    const env = { AGENT_ENGINE_RESOURCE: RES, TENANT_PROVIDER_CONFIG: bad };
+    let c;
+    assert.doesNotThrow(() => { c = resolveProviderConfig(undefined, env); }, `bad=${bad}`);
+    assert.strictEqual(c.source, 'managed', `bad=${bad}`);
+    assert.strictEqual(c.agentEngine.resource, RES, `bad=${bad}`);
+  }
+});
+
+test('wrong-typed per-call override leaf does not throw either', () => {
+  let c;
+  assert.doesNotThrow(() => {
+    c = resolveProviderConfig({ agentEngine: { resource: 999, location: true } }, {});
+  });
+  assert.strictEqual(c.agentEngine.resource, '999'); // coerced
+  assert.strictEqual(typeof c.agentEngine.location, 'string');
+});
+
+test('boolean leaf is coerced to its string form', () => {
+  const c = resolveProviderConfig(undefined, {
+    TENANT_PROVIDER_CONFIG: JSON.stringify({ image: { model: false } }),
+  });
+  assert.strictEqual(c.image.model, 'false');
+});
