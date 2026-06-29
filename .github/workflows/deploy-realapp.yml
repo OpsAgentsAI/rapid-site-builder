@@ -11,12 +11,12 @@ name: Deploy Real App (auth-ON, separate surface)
 # auto-stand-up a new prod surface. A human/devops dispatches it deliberately.
 #
 # ── One-time prerequisites before the FIRST dispatch (devops, ~1 min) ────────
-#   1. Create the Hosting site:  firebase hosting:sites:create rapid-site-builder-app --project opsagent-staging
-#   2. Add it as an authorizedDomain for Google sign-in on opsagent-staging
-#      (Identity Platform): rapid-site-builder-app.web.app
-#   3. Confirm the runtime SA can read the secret:
-#      gcloud secrets add-iam-policy-binding rapid-builder-session-secret \
-#        --member="serviceAccount:<RUN_SERVICE_ACCOUNT>" --role=roles/secretmanager.secretAccessor --project <PROJECT_ID>
+#   1. Create the Hosting site — now done idempotently inside the "Deploy Firebase
+#      Hosting" step below (firebase hosting:sites:create, WIF-auth in the runner),
+#      so a fresh dispatch is self-sufficient. Creating the site also auto-authorizes
+#      rapid-site-builder-app.web.app for Google sign-in (Identity Platform).
+#   2. Confirm the runtime SA can read the secret (rapid-builder-proxy@…staging holds
+#      secretmanager.secretAccessor on rapid-builder-session-secret — verified 2026-06-29).
 #   (Phase-1 prereqs already in place per card VI673sym: rapid-builder-session-secret,
 #    GH secret FIREBASE_API_KEY, Google IdP enabled.)
 # Final gate is operator-only: one real Google sign-in QA (the "verify it's you"
@@ -91,6 +91,10 @@ jobs:
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
           npm install -g firebase-tools@13 >/dev/null 2>&1
+          # one-time idempotent Hosting-site creation (first dispatch); creating the
+          # site also auto-authorizes rapid-site-builder-app.web.app for Google sign-in.
+          firebase hosting:sites:create "$HOSTING_SITE" --project "$PROJECT_ID" 2>/dev/null \
+            || echo "hosting site $HOSTING_SITE already exists — continuing"
           firebase deploy --only "hosting:$HOSTING_SITE" --project "$PROJECT_ID" --non-interactive
 
       - name: Smoke test Hosting
