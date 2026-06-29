@@ -86,16 +86,20 @@ jobs:
           # a deploy that silently lost the auth env would otherwise publish ungated)
           grep -q '"auth":true' /tmp/health.json
 
-      - name: Deploy Firebase Hosting (separate site)
+      - name: Deploy Firebase Hosting (separate site, via Cloud Build native ADC)
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
-          npm install -g firebase-tools@13 >/dev/null 2>&1
-          # one-time idempotent Hosting-site creation (first dispatch); creating the
-          # site also auto-authorizes rapid-site-builder-app.web.app for Google sign-in.
-          firebase hosting:sites:create "$HOSTING_SITE" --project "$PROJECT_ID" 2>/dev/null \
-            || echo "hosting site $HOSTING_SITE already exists — continuing"
-          firebase deploy --only "hosting:$HOSTING_SITE" --project "$PROJECT_ID" --non-interactive
+          # firebase-tools (Node google-auth) cannot consume the WIF external_account
+          # credential on the runner — it fails "Failed to authenticate" deterministically.
+          # So gcloud (WIF works on the runner) submits a Cloud Build that runs the hosting
+          # deploy INSIDE GCP via metadata ADC (build SA gha-deployer@opsagent-staging,
+          # firebase.admin). The config is SCOPED to rapid-site-builder-app only, so the
+          # hackathon sites stay untouched. Mirrors deploy.yml's cloudbuild-hosting.yaml.
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-realapp-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
 
       - name: Smoke test Hosting
         run: |
