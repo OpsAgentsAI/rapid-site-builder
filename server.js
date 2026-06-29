@@ -19,9 +19,10 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner, listAllSites } = require('./lib/store');
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
+const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
 
 const app = express();
@@ -284,8 +285,12 @@ app.post('/api/session', async (req, res) => {
   const idToken = (req.body && req.body.idToken) || '';
   try {
     const claims = await auth.verifyFirebaseIdToken(idToken, { projectId: auth.FB_PROJECT });
+    // Carry email_verified into the session so privileged gates (admin) can
+    // require a verified identity — a Firebase token can match an allowlisted
+    // email string while email_verified:false (e.g. Email/Password provider).
     auth.setSessionCookie(res, auth.signSession({
-      exp: Date.now() + auth.SESSION_TTL_MS, uid: claims.sub, email: claims.email || ''
+      exp: Date.now() + auth.SESSION_TTL_MS, uid: claims.sub,
+      email: claims.email || '', email_verified: claims.email_verified === true
     }), auth.SESSION_TTL_MS);
     res.json({ ok: true, uid: claims.sub, email: claims.email || '' });
   } catch (e) {
@@ -474,16 +479,51 @@ app.post('/api/warm-images', async (req, res) => {
   res.json(out);
 });
 
+// ---- admin: all published sites (card fp7wXxjb, mandatory baseline #1) -------------
+// Two gates, both env-driven (see lib/admin.js): an allowlisted signed-in email
+// (browser) or an x-admin-key header (automation). Non-admins get 404 — never a
+// 403 — so the surface's existence isn't confirmed, and the cross-tenant list is
+// only ever assembled for an authorized caller (never a client-side bucket read).
+function adminFromReq(req) {
+  if (adminKeyOk(req.get('x-admin-key'))) return { via: 'key' };
+  if (auth.AUTH_ENABLED) {
+    const s = auth.sessionFromReq(req);
+    // Verified-email allowlist check (lib/admin.sessionIsAdmin): a matching
+    // email string is not enough — a token can carry an allowlisted email with
+    // email_verified:false. Pre-plumbing sessions lack the field → unverified.
+    if (sessionIsAdmin(s)) return { via: 'session', email: s.email };
+  }
+  return null;
+}
+
+app.get('/api/admin/sites', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!adminFromReq(req)) return res.status(404).json({ error: 'Not found.' });
+  try {
+    const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+    const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+    const sites = (await listAllSites()).map(s => ({ ...s, url: `${base}/sites/${s.id}` }));
+    res.json({ sites, count: sites.length });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
 // ---- pages + health ---------------------------------------------------------------
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'web', 'index.html')));
 app.get(['/board', '/board/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'board', 'index.html')));
 app.get(['/campfire', '/campfire/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'campfire', 'index.html')));
+// The admin shell carries no data and no auth-scheme detail — it just runs the
+// standard Google sign-in and calls /api/admin/sites, which is the real gate.
+app.get(['/admin', '/admin/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'admin', 'index.html')));
 app.get('/api/health', (_req, res) => res.json({
   ok: true,
   agentEngine: engine.ENABLED,
   imagesBucket: !!process.env.SITE_IMAGES_BUCKET,
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
   auth: auth.AUTH_ENABLED,
+  admin: auth.AUTH_ENABLED || !!process.env.ADMIN_KEY,
   uploadsBucket: uploads.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
