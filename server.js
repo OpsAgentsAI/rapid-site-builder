@@ -22,7 +22,7 @@ const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = req
 const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner, listAllSites } = require('./lib/store');
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
-const { isAdminEmail, adminKeyOk } = require('./lib/admin');
+const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
 
 const app = express();
@@ -285,8 +285,12 @@ app.post('/api/session', async (req, res) => {
   const idToken = (req.body && req.body.idToken) || '';
   try {
     const claims = await auth.verifyFirebaseIdToken(idToken, { projectId: auth.FB_PROJECT });
+    // Carry email_verified into the session so privileged gates (admin) can
+    // require a verified identity — a Firebase token can match an allowlisted
+    // email string while email_verified:false (e.g. Email/Password provider).
     auth.setSessionCookie(res, auth.signSession({
-      exp: Date.now() + auth.SESSION_TTL_MS, uid: claims.sub, email: claims.email || ''
+      exp: Date.now() + auth.SESSION_TTL_MS, uid: claims.sub,
+      email: claims.email || '', email_verified: claims.email_verified === true
     }), auth.SESSION_TTL_MS);
     res.json({ ok: true, uid: claims.sub, email: claims.email || '' });
   } catch (e) {
@@ -484,7 +488,10 @@ function adminFromReq(req) {
   if (adminKeyOk(req.get('x-admin-key'))) return { via: 'key' };
   if (auth.AUTH_ENABLED) {
     const s = auth.sessionFromReq(req);
-    if (s && isAdminEmail(s.email)) return { via: 'session', email: s.email };
+    // Verified-email allowlist check (lib/admin.sessionIsAdmin): a matching
+    // email string is not enough — a token can carry an allowlisted email with
+    // email_verified:false. Pre-plumbing sessions lack the field → unverified.
+    if (sessionIsAdmin(s)) return { via: 'session', email: s.email };
   }
   return null;
 }

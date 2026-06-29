@@ -1,7 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { isAdminEmail, adminKeyOk, adminEmails, DEFAULT_ADMINS } = require('../lib/admin');
+const { isAdminEmail, adminKeyOk, adminEmails, DEFAULT_ADMINS, sessionIsAdmin } = require('../lib/admin');
 
 test('default allowlist is the two MSApps admin emails', () => {
   const list = adminEmails({});
@@ -39,4 +39,23 @@ test('adminKeyOk matches the exact configured key only', () => {
   assert.ok(!adminKeyOk('s3cret-kex', env));  // same length, wrong char
   assert.ok(!adminKeyOk('', env));
   assert.ok(!adminKeyOk(undefined, env));
+});
+
+test('sessionIsAdmin requires a verified email on the allowlist', () => {
+  // verified + allowlisted → admin
+  assert.ok(sessionIsAdmin({ email: 'michal@opsagents.agency', email_verified: true }, {}));
+});
+
+test('sessionIsAdmin rejects an allowlisted email that is NOT verified', () => {
+  // the core finding: a matching email string with email_verified:false (or
+  // absent — pre-plumbing sessions) must NOT reach the cross-tenant admin view.
+  assert.ok(!sessionIsAdmin({ email: 'michal@opsagents.agency', email_verified: false }, {}));
+  assert.ok(!sessionIsAdmin({ email: 'michal@opsagents.agency' }, {}));
+  assert.ok(!sessionIsAdmin({ email: 'michal@opsagents.agency', email_verified: 'true' }, {})); // strict ===true
+});
+
+test('sessionIsAdmin rejects a verified email NOT on the allowlist, and empty/null sessions', () => {
+  assert.ok(!sessionIsAdmin({ email: 'someone@else.com', email_verified: true }, {}));
+  assert.ok(!sessionIsAdmin(null, {}));
+  assert.ok(!sessionIsAdmin({}, {}));
 });
