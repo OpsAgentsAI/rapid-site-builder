@@ -487,6 +487,14 @@ app.get('/api/health', (_req, res) => res.json({
   uploadsBucket: uploads.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
+// Client runtime config (card WZtm0jA3): the GA4 Measurement ID this deployment
+// is wired to, read by web/analytics.js. Empty string when unset → analytics is
+// a no-op, so a judge cloning the public repo runs with zero tracking config.
+app.get('/api/client-config', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ ga4Id: process.env.GA4_MEASUREMENT_ID || '' });
+});
+
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 if (require.main === module) {

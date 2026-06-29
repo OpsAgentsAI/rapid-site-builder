@@ -637,6 +637,7 @@
   async function ask() {
     const q = $('ask-in').value.trim();
     if (!q) return;
+    if (window.rsbTrack) rsbTrack('ask_theo', {});
     const btn = $('ask-go'), reply = $('ask-reply');
     btn.disabled = true;
     reply.style.display = 'block';
