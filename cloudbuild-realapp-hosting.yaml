@@ -1,0 +1,28 @@
+# Hosting-only deploy from INSIDE GCP via Cloud Build — the WIF-on-runner workaround.
+#
+# firebase-tools (Node google-auth) cannot consume the WIF external_account credential
+# on a GitHub-hosted runner ("Failed to authenticate, have you run firebase login?")
+# DETERMINISTICALLY. Inside Cloud Build the CLI authenticates via the metadata server
+# (native ADC as the build SA gha-deployer@opsagent-staging, firebase.admin), so the
+# failure class disappears. Mirrors deploy.yml's cloudbuild-hosting.yaml — but SCOPED to
+# the separate auth-ON site rapid-site-builder-app ONLY. The hackathon sites
+# (rapid-site-builder + rapid-site-builder-he) are NEVER touched here (Michal's guardrail).
+steps:
+  - name: 'node:22'
+    id: deploy-realapp-hosting
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        echo "== create Hosting site if missing (idempotent) =="
+        npx -y firebase-tools@15.21.0 hosting:sites:create rapid-site-builder-app \
+          --project opsagent-staging 2>/dev/null || echo "site rapid-site-builder-app already exists — continuing"
+        echo "== Firebase hosting deploy (rapid-site-builder-app ONLY) =="
+        npx -y firebase-tools@15.21.0 deploy \
+          --only hosting:rapid-site-builder-app \
+          --project opsagent-staging --non-interactive
+# CLOUD_LOGGING_ONLY is required when a build runs as a user-managed --service-account.
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 600s
