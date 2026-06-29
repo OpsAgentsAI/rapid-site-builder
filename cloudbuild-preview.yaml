@@ -1,0 +1,94 @@
+# Per-PR Firebase Hosting *preview channel* deploy from INSIDE GCP via Cloud Build.
+#
+# Same WIF-on-runner workaround as cloudbuild-hosting.yaml (card TqVyLB7q): firebase-tools
+# (Node google-auth) CANNOT consume the WIF external_account credential on a GitHub-hosted
+# runner — `hosting:channel:deploy` fails "Failed to authenticate, have you run firebase
+# login?" DETERMINISTICALLY. gcloud/curl mint tokens from the same runner fine; only the
+# Node CLI fails. Inside Cloud Build the CLI authenticates via the metadata server (native
+# ADC as the build service account), so the whole failure class disappears — exactly the
+# fix already proven for the prod hosting deploy in deploy.yml (#28 / wfbwoc9B).
+#
+# GHA submits this with `gcloud builds submit` (gcloud's WIF/STS path works on the runner),
+# passing the PR number as the _PR_NUMBER substitution. Source = repo root, web/ shipped
+# AS-IS (NOT URL-baked): board.js/index.html resolve `const API = RAW_API.startsWith('http')
+# ? RAW_API : ''`, so the un-baked __API_BASE__ placeholder makes the preview call same-origin
+# /api/*, which the firebase.json "**" rewrite proxies to the live rapid-builder-proxy Cloud
+# Run — avoiding the prod ALLOWED_ORIGINS CORS wall. Runs as gha-deployer@opsagent-staging
+# (firebase.admin).
+#
+# RETURNING THE URL — via GCS, not stdout. A user-managed --service-account build REQUIRES
+# options.logging: CLOUD_LOGGING_ONLY, and with that the build steps' stdout is NOT streamed
+# back by `gcloud builds submit`, so a PREVIEW_URL= line printed here never reaches the GHA
+# runner (it greps an empty log → false fail, even though the channel deployed). Instead the
+# deploy step writes the URL to a file and a second step uploads it to a deterministic GCS
+# object the submitting GHA step reads back with `gcloud storage cat`.
+#
+# NOTE on `$$`: Cloud Build expands `$FOO`/`${FOO}` as build substitutions, so every SHELL
+# variable below is escaped as `$$VAR` (literal `$VAR` at runtime). Only `${_PR_NUMBER}` and
+# the built-in `${PROJECT_ID}` are real substitutions and stay single-`$`. An unescaped `$URL`
+# makes the build fail "invalid value for 'build.substitutions': key in the template \"URL\"
+# is not a valid built-in substitution" before the deploy ever runs.
+steps:
+  - name: 'node:22'
+    id: deploy-preview-channel
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        set -o pipefail
+        echo "== Firebase hosting:channel:deploy (native metadata ADC — no WIF/STS hop) =="
+        # Capture JSON to a file via redirection, NOT `| tee`: tee would mask the
+        # deploy's own exit status and let firebase's update-notice preamble pollute
+        # the payload we parse (carried over from preview.yml hardening, card ArElDeYM).
+        npx -y firebase-tools@15.21.0 hosting:channel:deploy "pr-${_PR_NUMBER}" \
+          --only rapid-site-builder \
+          --project opsagent-staging \
+          --expires 7d --json --non-interactive > /workspace/ch.json 2> /workspace/ch.err || {
+            echo "firebase hosting:channel:deploy failed — stderr:" >&2
+            cat /workspace/ch.err >&2
+            exit 1
+          }
+        cat /workspace/ch.json
+        # Robust URL extraction: strip any non-JSON preamble before the first '{', then
+        # recursively scan for the first http(s) url so it survives result-shape drift and
+        # stray firebase log lines. Writes the channel URL to /workspace/preview_url.txt for
+        # the next step to upload to GCS (stdout is not visible to the submitting runner).
+        URL=$(node -e '
+          const fs = require("fs");
+          let raw = fs.readFileSync("/workspace/ch.json", "utf8");
+          const brace = raw.indexOf("{");
+          if (brace > 0) raw = raw.slice(brace);
+          let j = {};
+          try { j = JSON.parse(raw); }
+          catch (e) { console.error("preview: JSON parse failed: " + e.message); process.exit(0); }
+          const scan = (o) => {
+            if (!o || typeof o !== "object") return "";
+            if (typeof o.url === "string" && /^https?:\/\//.test(o.url)) return o.url;
+            for (const v of Object.values(o)) { const u = scan(v); if (u) return u; }
+            return "";
+          };
+          process.stdout.write(scan(j.result || j) || "");
+        ')
+        if [ -z "$$URL" ]; then
+          echo "preview: deploy succeeded but no channel URL could be extracted from the --json output above" >&2
+          exit 1
+        fi
+        printf '%s' "$$URL" > /workspace/preview_url.txt
+        echo "PREVIEW_URL=$$URL"   # also logged to Cloud Logging for debugging
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    id: publish-preview-url
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        # Hand the channel URL back to the submitting GHA step via a deterministic GCS
+        # object (the build's stdout is invisible to it under CLOUD_LOGGING_ONLY). The
+        # ${PROJECT_ID}_cloudbuild staging bucket already exists and gha-deployer can write it.
+        gcloud storage cp /workspace/preview_url.txt \
+          "gs://${PROJECT_ID}_cloudbuild/preview-urls/pr-${_PR_NUMBER}.txt"
+# CLOUD_LOGGING_ONLY is required when a build runs as a user-managed --service-account.
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 600s

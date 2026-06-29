@@ -21,9 +21,6 @@ concurrency:
   group: preview-${{ github.event.number }}
   cancel-in-progress: true
 
-env:
-  HOSTING_SITE: rapid-site-builder
-
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -37,50 +34,31 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy preview channel
+      - name: Deploy preview channel (via Cloud Build — WIF-on-runner workaround)
         id: deploy
         run: |
-          npm install -g firebase-tools@13 >/dev/null 2>&1
-          # Capture JSON to a file via redirection, NOT `| tee`: tee kept the
-          # pipeline's exit status as tee's (always 0) so a failed deploy slipped
-          # through, and it let firebase's update-notice preamble land in the file.
-          # We need the deploy's own exit code and a clean-ish payload to parse.
+          # firebase-tools (Node google-auth) CANNOT consume the WIF external_account
+          # credential on a GitHub-hosted runner — hosting:channel:deploy fails
+          # "Failed to authenticate, have you run firebase login?" DETERMINISTICALLY.
+          # gcloud/curl mint tokens from the same runner fine; only the Node CLI fails.
+          # So gcloud (WIF works on the runner) submits a Cloud Build that runs the channel
+          # deploy INSIDE GCP via metadata-server ADC — the failure class disappears. This
+          # is the same fix already proven for the prod hosting deploy in deploy.yml
+          # (#28 / wfbwoc9B); see cloudbuild-preview.yaml. The build runs as
+          # gha-deployer@opsagent-staging (firebase.admin) and ships web/ AS-IS (no
+          # __API_BASE__ bake) so the preview calls same-origin /api/* through the "**"
+          # rewrite. The build hands the channel URL back via a GCS object (its stdout is
+          # invisible here under the build's required CLOUD_LOGGING_ONLY) — we read it back.
           set -o pipefail
-          firebase hosting:channel:deploy "pr-${{ github.event.number }}" \
-            --only "$HOSTING_SITE" \
+          gcloud builds submit . \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --expires 7d --json > /tmp/ch.json 2>/tmp/ch.err || {
-              echo "::error::firebase hosting:channel:deploy failed — see stderr below"
-              cat /tmp/ch.err >&2
-              exit 1
-            }
-          cat /tmp/ch.json
-          # Robust URL extraction. The old one-liner assumed the exact shape
-          #   j.result[<firstKey>].url
-          # and printed '' (exit 0) whenever firebase drifted that shape or
-          # prepended a non-JSON update notice — which the smoke step then read as
-          # an empty URL and FALSE-FAILED the whole PR check even though the deploy
-          # succeeded (card ArElDeYM). This version strips any preamble before the
-          # first '{' and recursively scans for the first http(s) channel url, so
-          # it survives result-shape drift and stray firebase log lines.
-          URL=$(node -e '
-            const fs = require("fs");
-            let raw = fs.readFileSync("/tmp/ch.json", "utf8");
-            const brace = raw.indexOf("{");
-            if (brace > 0) raw = raw.slice(brace);          // drop update-notice preamble
-            let j = {};
-            try { j = JSON.parse(raw); }
-            catch (e) { console.error("preview: JSON parse failed: " + e.message); process.exit(0); }
-            const scan = (o) => {
-              if (!o || typeof o !== "object") return "";
-              if (typeof o.url === "string" && /^https?:\/\//.test(o.url)) return o.url;
-              for (const v of Object.values(o)) { const u = scan(v); if (u) return u; }
-              return "";
-            };
-            process.stdout.write(scan(j.result || j) || "");
-          ')
+            --config=cloudbuild-preview.yaml \
+            --substitutions=_PR_NUMBER="${{ github.event.number }}" \
+            --service-account="projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+          # Read the channel URL the build wrote to GCS (stdout isn't visible under CLOUD_LOGGING_ONLY).
+          URL=$(gcloud storage cat "gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt" 2>/dev/null || true)
           if [ -z "$URL" ]; then
-            echo "::error::preview deploy reported success but no channel URL could be extracted — inspect the firebase --json output logged above"
+            echo "::error::Cloud Build preview deploy produced no channel URL at gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt — inspect the Cloud Build logs"
             exit 1
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
