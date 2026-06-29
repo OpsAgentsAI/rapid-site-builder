@@ -47,18 +47,18 @@ jobs:
           # (#28 / wfbwoc9B); see cloudbuild-preview.yaml. The build runs as
           # gha-deployer@opsagent-staging (firebase.admin) and ships web/ AS-IS (no
           # __API_BASE__ bake) so the preview calls same-origin /api/* through the "**"
-          # rewrite. The channel URL is emitted on a PREVIEW_URL= line in the build log.
+          # rewrite. The build hands the channel URL back via a GCS object (its stdout is
+          # invisible here under the build's required CLOUD_LOGGING_ONLY) — we read it back.
           set -o pipefail
           gcloud builds submit . \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --config=cloudbuild-preview.yaml \
             --substitutions=_PR_NUMBER="${{ github.event.number }}" \
-            --service-account="projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com" \
-            2>&1 | tee /tmp/preview-build.log
-          # Capture the channel URL from the streamed build log (last PREVIEW_URL= line).
-          URL=$(grep -oE 'PREVIEW_URL=https?://[^[:space:]]+' /tmp/preview-build.log | tail -1 | cut -d= -f2-)
+            --service-account="projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+          # Read the channel URL the build wrote to GCS (stdout isn't visible under CLOUD_LOGGING_ONLY).
+          URL=$(gcloud storage cat "gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt" 2>/dev/null || true)
           if [ -z "$URL" ]; then
-            echo "::error::Cloud Build preview deploy produced no PREVIEW_URL — inspect the build log above"
+            echo "::error::Cloud Build preview deploy produced no channel URL at gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt — inspect the Cloud Build logs"
             exit 1
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
