@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<title>Admin · Rapid Site Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+  :root{
+    --brand-orange:#F05E22;--brand-gradient:linear-gradient(135deg,#F05E22 0%,#D94E15 100%);
+    --canvas:#F4F5FA;--surface:#FFFFFF;--border:#E4E7F1;--ink:#1E2138;--ink-2:#4A4F6B;--ink-3:#7A809B;
+    --radius-md:14px;--radius-lg:16px;--shadow-card:0 4px 14px rgba(20,22,40,.08);
+    --font:'Rubik',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--font);line-height:1.5}
+  .wrap{max-width:1040px;margin:0 auto;padding:32px 20px 64px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+  h1{font-size:22px;font-weight:800;margin:0}
+  .sub{color:var(--ink-3);font-size:14px;margin:2px 0 24px}
+  .pill{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2);
+    background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:7px 14px}
+  button{font-family:var(--font);font-weight:600;font-size:14px;border:0;border-radius:999px;cursor:pointer;
+    padding:10px 18px;background:var(--brand-gradient);color:#fff}
+  button.ghost{background:var(--surface);color:var(--ink-2);border:1px solid var(--border)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-3);background:#FAFBFE}
+  tr:last-child td{border-bottom:0}
+  td.biz{font-weight:600}
+  a{color:var(--brand-orange);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .muted{color:var(--ink-3)}
+  .state{padding:48px 20px;text-align:center;color:var(--ink-2)}
+  .state h2{font-size:17px;margin:0 0 6px}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#F1F2F8;padding:2px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>🛠️ Admin — Published sites</h1>
+      <div class="sub">Every site published on Rapid Site Builder, newest first. Admin-only (card fp7wXxjb).</div>
+    </div>
+    <div id="who"></div>
+  </header>
+  <div id="content" class="card"><div class="state"><h2>Loading…</h2></div></div>
+</div>
+
+<script src="/auth.js"></script>
+<script>
+(function(){
+  'use strict';
+  var content = document.getElementById('content');
+  var who = document.getElementById('who');
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function fmt(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString(); }catch(e){ return iso; } }
+
+  function state(html){ content.innerHTML = '<div class="state">'+html+'</div>'; }
+
+  function renderTable(sites){
+    if(!sites.length){ state('<h2>No published sites yet</h2><p class="muted">Sites appear here as visitors publish.</p>'); return; }
+    var rows = sites.map(function(s){
+      return '<tr>'+
+        '<td class="biz">'+esc(s.business||'(untitled)')+'</td>'+
+        '<td><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.id)+'</a></td>'+
+        '<td>'+(s.ownerEmail?esc(s.ownerEmail):'<span class="muted">anonymous</span>')+'</td>'+
+        '<td class="muted">'+esc(fmt(s.createdAt))+'</td>'+
+      '</tr>';
+    }).join('');
+    content.innerHTML =
+      '<table><thead><tr><th>Business</th><th>Site</th><th>Owner</th><th>Published</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table>';
+  }
+
+  function load(){
+    return fetch('/api/admin/sites', { credentials:'same-origin' }).then(function(r){
+      if(r.status===404){ throw { notAdmin:true }; }
+      if(!r.ok){ throw new Error('HTTP '+r.status); }
+      return r.json();
+    }).then(function(d){
+      who.innerHTML = '<span class="pill">'+(d.count||0)+' sites</span>';
+      renderTable(d.sites||[]);
+    });
+  }
+
+  function showSignIn(msg){
+    state('<h2>'+esc(msg||'Admin sign-in required')+'</h2>'+
+      '<p class="muted">Sign in with an allowlisted Google account.</p>'+
+      '<p><button id="si">Sign in with Google</button></p>');
+    var b = document.getElementById('si');
+    if(b) b.onclick = function(){
+      if(!window.RSB_AUTH){ state('<h2>Sign-in unavailable on this deployment</h2><p class="muted">Set the Firebase env, or call <code>/api/admin/sites</code> with the <code>x-admin-key</code> header.</p>'); return; }
+      RSB_AUTH.signIn().then(function(){ start(); }).catch(function(){ showSignIn('Sign-in failed — try again'); });
+    };
+  }
+
+  function start(){
+    // Try the data endpoint first — a header-key admin or an already-signed-in
+    // allowlisted session loads straight through; otherwise fall to sign-in.
+    load().catch(function(err){
+      if(err && err.notAdmin){
+        if(window.RSB_AUTH){
+          RSB_AUTH.config().then(function(cfg){
+            showSignIn(cfg && cfg.me ? 'This account is not on the admin allowlist' : 'Admin sign-in required');
+          });
+        } else {
+          showSignIn('Admin sign-in required');
+        }
+      } else {
+        state('<h2>Could not load</h2><p class="muted">'+esc((err&&err.message)||'Unknown error')+'</p>');
+      }
+    });
+  }
+
+  // Complete any Google redirect sign-in, then start.
+  if(window.RSB_AUTH && RSB_AUTH.completeRedirect){
+    RSB_AUTH.completeRedirect().then(start).catch(start);
+  } else { start(); }
+})();
+</script>
+</body>
+</html>
