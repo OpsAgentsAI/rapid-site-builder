@@ -41,12 +41,50 @@ jobs:
         id: deploy
         run: |
           npm install -g firebase-tools@13 >/dev/null 2>&1
+          # Capture JSON to a file via redirection, NOT `| tee`: tee kept the
+          # pipeline's exit status as tee's (always 0) so a failed deploy slipped
+          # through, and it let firebase's update-notice preamble land in the file.
+          # We need the deploy's own exit code and a clean-ish payload to parse.
+          set -o pipefail
           firebase hosting:channel:deploy "pr-${{ github.event.number }}" \
             --only "$HOSTING_SITE" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --expires 7d --json | tee /tmp/ch.json
-          URL=$(node -e "const j=require('/tmp/ch.json');const s=Object.values(j.result||{})[0]||{};console.log(s.url||'')")
+            --expires 7d --json > /tmp/ch.json 2>/tmp/ch.err || {
+              echo "::error::firebase hosting:channel:deploy failed — see stderr below"
+              cat /tmp/ch.err >&2
+              exit 1
+            }
+          cat /tmp/ch.json
+          # Robust URL extraction. The old one-liner assumed the exact shape
+          #   j.result[<firstKey>].url
+          # and printed '' (exit 0) whenever firebase drifted that shape or
+          # prepended a non-JSON update notice — which the smoke step then read as
+          # an empty URL and FALSE-FAILED the whole PR check even though the deploy
+          # succeeded (card ArElDeYM). This version strips any preamble before the
+          # first '{' and recursively scans for the first http(s) channel url, so
+          # it survives result-shape drift and stray firebase log lines.
+          URL=$(node -e '
+            const fs = require("fs");
+            let raw = fs.readFileSync("/tmp/ch.json", "utf8");
+            const brace = raw.indexOf("{");
+            if (brace > 0) raw = raw.slice(brace);          // drop update-notice preamble
+            let j = {};
+            try { j = JSON.parse(raw); }
+            catch (e) { console.error("preview: JSON parse failed: " + e.message); process.exit(0); }
+            const scan = (o) => {
+              if (!o || typeof o !== "object") return "";
+              if (typeof o.url === "string" && /^https?:\/\//.test(o.url)) return o.url;
+              for (const v of Object.values(o)) { const u = scan(v); if (u) return u; }
+              return "";
+            };
+            process.stdout.write(scan(j.result || j) || "");
+          ')
+          if [ -z "$URL" ]; then
+            echo "::error::preview deploy reported success but no channel URL could be extracted — inspect the firebase --json output logged above"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Preview channel URL: $URL"
 
       - name: Smoke test the channel
         run: |
