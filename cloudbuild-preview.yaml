@@ -16,6 +16,12 @@
 # Run — avoiding the prod ALLOWED_ORIGINS CORS wall. Runs as gha-deployer@opsagent-staging
 # (firebase.admin). The channel URL is parsed from the --json result and emitted to the build
 # log on a PREVIEW_URL= line so the submitting GHA step can capture it.
+#
+# NOTE on `$$`: Cloud Build expands `$FOO`/`${FOO}` as build substitutions, so every SHELL
+# variable below is escaped as `$$VAR` (literal `$VAR` at runtime). Only `${_PR_NUMBER}` is a
+# real substitution and stays single-`$`. An unescaped `$URL` makes the build fail
+# "invalid value for 'build.substitutions': key in the template \"URL\" is not a valid
+# built-in substitution" before the deploy ever runs.
 steps:
   - name: 'node:22'
     id: deploy-preview-channel
@@ -58,11 +64,11 @@ steps:
           };
           process.stdout.write(scan(j.result || j) || "");
         ')
-        if [ -z "$URL" ]; then
+        if [ -z "$$URL" ]; then
           echo "preview: deploy succeeded but no channel URL could be extracted from the --json output above" >&2
           exit 1
         fi
-        echo "PREVIEW_URL=$URL"
+        echo "PREVIEW_URL=$$URL"
 # CLOUD_LOGGING_ONLY is required when a build runs as a user-managed --service-account.
 options:
   logging: CLOUD_LOGGING_ONLY
