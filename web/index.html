@@ -269,6 +269,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         <div class="err" id="err"></div>
         <div class="actions" id="actions">
           <button class="btn primary" id="publish" data-i18n="publish">Publish it — free</button>
+          <a class="btn primary" id="upgrade" target="_blank" rel="noopener" style="display:none;text-decoration:none" data-i18n="upgrade.keep">Keep your site live</a>
           <a class="btn ghost" id="board-link" href="/board" data-i18n="board.link">Meet your ops team</a>
           <button class="btn ghost" id="again" data-i18n="again">Build another</button>
         </div>
@@ -614,7 +615,21 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         r = await doPublish();
         j = await r.json();
       }
+      // Free-plan cap (card KY2YTmoL): the server answered 402 with an upsell
+      // payload instead of publishing — show the message and, when a checkout
+      // page is configured, the "Keep your site live" CTA. No price copy here.
+      if (r.status === 402 && j.upgrade) {
+        $('err').textContent = j.error || T('dyn.limit');
+        $('err').style.display = 'block';
+        if (j.checkoutUrl) { $('upgrade').href = j.checkoutUrl; $('upgrade').style.display = 'inline-flex'; }
+        $('publish').disabled = false;
+        $('publish').textContent = T('publish');
+        return;
+      }
       if (!r.ok) throw new Error(j.error || 'Publish failed');
+      // Published on the free tier with a checkout page configured — offer the
+      // upgrade right where the live URL lands.
+      if (j.checkoutUrl) { $('upgrade').href = j.checkoutUrl; $('upgrade').style.display = 'inline-flex'; }
       setPill('max', 'd', 'shipped ' + j.url);
       agentsRan.add('max');
       lastByAgent.max = 'Shipped the site live: ' + j.url;

@@ -23,6 +23,8 @@ const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadL
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
+const ent = require('./lib/entitlements');
+const { UID_RE } = require('./lib/store');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -339,6 +341,53 @@ app.get('/api/my-sites', async (req, res) => {
   }
 });
 
+// ---- entitlements (card KY2YTmoL) -------------------------------------------------
+// Free/paid plans over the existing site store — see lib/entitlements.js.
+// Enforcement lives in /api/publish; these two routes are the read surface
+// (powers the "Keep your site live" CTA) and the manual admin reconcile.
+
+// Entitlement snapshot for the signed-in caller. Never cacheable.
+app.get('/api/entitlement', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!auth.AUTH_ENABLED) return res.status(503).json({ error: 'Sign-in is not configured on this deployment.' });
+  const session = auth.sessionFromReq(req);
+  if (!session || !session.uid) return res.status(401).json({ error: 'Sign in first.' });
+  try {
+    const plan = await ent.getPlan(session.uid);
+    const used = plan === 'free' ? (await listSitesByOwner(session.uid)).length : null;
+    res.json({
+      plan,
+      cap: plan === 'free' ? ent.FREE_SITE_CAP : null,
+      used,
+      ...(plan === 'free' && ent.CHECKOUT_URL ? { checkoutUrl: ent.CHECKOUT_URL } : {})
+    });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
+// Manual reconcile: an allowlisted admin marks a uid paid (or back to free)
+// after the recurring payment is confirmed out-of-band. Deliberately manual
+// for the first customers — webhook automation is a later card. Non-admins get
+// the same 404 a wrong URL would (mirrors /api/warm-images' posture).
+app.post('/api/admin/set-plan', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!auth.AUTH_ENABLED) return res.status(404).end();
+  const session = auth.sessionFromReq(req);
+  if (!session || !ent.isAdmin(session.email)) return res.status(404).end();
+  const uid = String((req.body && req.body.uid) || '');
+  const plan = String((req.body && req.body.plan) || '');
+  if (!UID_RE.test(uid)) return res.status(400).json({ error: 'Bad uid.' });
+  if (!ent.PLANS.includes(plan)) return res.status(400).json({ error: 'Plan must be "free" or "paid".' });
+  try {
+    const record = await ent.setPlan(uid, plan, session.email);
+    console.log(`[entitlements] ${session.email} set ${uid} → ${record.plan}`);
+    res.json({ ok: true, uid, ...record });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
 // ---- media uploads ----------------------------------------------------------------
 // The browser asks for a short-lived signed PUT URL, then sends the file
 // straight to the private uploads bucket — file bytes never pass through this
@@ -375,6 +424,20 @@ app.post('/api/publish', async (req, res) => {
     const spec = req.body && req.body.spec;
     if (!spec || !spec.business) return res.status(400).json({ error: 'Missing site spec to publish.' });
     if (JSON.stringify(spec).length > 100_000) return res.status(413).json({ error: 'Spec too large.' });
+    // Entitlement gate (card KY2YTmoL): free accounts cap out at FREE_SITE_CAP
+    // live sites — over the cap, publish answers 402 with an upsell payload
+    // instead of persisting. Paid accounts skip the cap, the badge, and the
+    // expiry stamp. Anonymous surfaces (auth-off deploys) are untouched.
+    let plan = null;
+    if (session && session.uid) {
+      plan = await ent.getPlan(session.uid);
+      if (plan === 'free') {
+        const gate = ent.publishGate({ plan, ownedCount: (await listSitesByOwner(session.uid)).length });
+        if (!gate.ok) {
+          return res.status(gate.status).set('Cache-Control', 'private, no-store').json(gate.body);
+        }
+      }
+    }
     const heroImage = String(req.body.heroImage || '');
     // No-sign-in memory (card jvsQp6cS): a well-formed device id gets stamped
     // into the site's meta and a devices/<id>/<site> marker so /api/my-sites
@@ -383,7 +446,12 @@ app.post('/api/publish', async (req, res) => {
     // media URLs are re-validated against our own public-bucket shape (card 0wdldq3z) —
     // the published page never embeds an arbitrary client-supplied URL
     const userMedia = uploads.sanitizeUserMedia(req.body.userMedia);
-    const html = render(spec, { heroImage, userMedia }); // always server-rendered — never client HTML
+    let html = render(spec, { heroImage, userMedia }); // always server-rendered — never client HTML
+    // Free-tier stamp (card KY2YTmoL): expiry in meta + a small "Free site"
+    // badge on the page itself. Signed-in free publishes only — anonymous
+    // (auth-off) publishes keep the exact pre-entitlement output.
+    const expiresAt = plan === 'free' ? ent.freeExpiresAt() : null;
+    if (expiresAt) html = ent.injectFreeBadge(html);
     // Stamp ownership two ways, both optional and independent: an owner record
     // (signed-in publish, card VI673sym) and a device marker (anonymous memory,
     // card jvsQp6cS). On the auth-off deploy `session` is always null; on the
@@ -392,7 +460,9 @@ app.post('/api/publish', async (req, res) => {
       html,
       {
         business: String(spec.business).slice(0, 120),
-        ...(deviceId ? { deviceId } : {})
+        ...(deviceId ? { deviceId } : {}),
+        ...(plan ? { plan } : {}),
+        ...(expiresAt ? { expiresAt } : {})
       },
       session ? { uid: session.uid, email: session.email || '' } : null
     );
@@ -403,7 +473,14 @@ app.post('/api/publish', async (req, res) => {
     // LLM-EO: publish llms.txt next to the HTML so AI assistants can read the
     // business at a glance (llmstxt.org). Non-fatal — the site is the product.
     try { await saveLlms(id, llmsTxt(spec, `${base}/sites/${id}`)); } catch { /* best-effort */ }
-    res.json({ id, url: `${base}/sites/${id}` });
+    res.json({
+      id, url: `${base}/sites/${id}`,
+      ...(plan ? { plan } : {}),
+      ...(expiresAt ? { expiresAt } : {}),
+      // Post-publish "Keep your site live" CTA — only for free-tier publishes
+      // and only when the operator has configured a checkout page.
+      ...(plan === 'free' && ent.CHECKOUT_URL ? { checkoutUrl: ent.CHECKOUT_URL } : {})
+    });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
   }
@@ -485,6 +562,7 @@ app.get('/api/health', (_req, res) => res.json({
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
   auth: auth.AUTH_ENABLED,
   uploadsBucket: uploads.ENABLED,
+  checkout: !!ent.CHECKOUT_URL,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
