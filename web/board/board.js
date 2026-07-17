@@ -671,6 +671,11 @@
           .map(s => ({ id: s.id, url: s.url, business: s.business, at: Date.parse(s.createdAt) || 0 }));
       } catch { /* keep the device list painted above */ }
       if (acct.length) { mySites = acct; paintMySites(acct); renderSwitcher(); }
+      // P2b (card RzaCDxAa): the "send the team new photos" panel — only for
+      // sites the ACCOUNT list returned (server-attested ownership); device-
+      // memory entries never qualify. The server re-checks uid vs ownerUid on
+      // every call anyway — this gate is purely presentational.
+      p2bInit(acct);
       $('mysites').style.display = 'block';
       $('mysites-label').textContent = 'on your account';
       $('mysites-acct').innerHTML = `<span>${esc(cfg.me.email || 'signed in')}</span><button id="acct-out" style="${ACCT_BTN}">Sign out</button>`;
@@ -690,6 +695,112 @@
     $('mysites-list').innerHTML = mine.slice(0, 12).map(s =>
       `<a href="${esc(s.url)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;font-size:13px;font-weight:600;color:var(--ink-2);text-decoration:none">${esc(s.business || s.id)}<span style="font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3)">/${esc(s.id)}</span></a>`
     ).join('');
+  }
+
+  // ===== P2b (card RzaCDxAa): send the team new photos =====
+  // Post-login media updates for a live site. Upload path is P2a's exactly:
+  // sign (API origin, no cookie needed) → PUT straight to the private bucket →
+  // POST the server-shaped names to /api/site-media (RELATIVE url — rides the
+  // Hosting rewrite so the first-party `__session` cookie travels). The server
+  // verifies ownership and either re-renders (flag on + spec on file) or files
+  // a pending re-render request on the site meta.
+  let p2bOwned = [];   // account-listed sites — the only valid targets
+  let p2bQueue = [];   // { name, kind } verified-shape upload names to send
+  let p2bBusy = 0;     // uploads in flight (also holds the cap, like the landing page)
+
+  function p2bTarget() {
+    if (!p2bOwned.length) return null;
+    return p2bOwned.find(s => s.id === selectedId) || p2bOwned[0];
+  }
+  function p2bPaint() {
+    const t = p2bTarget();
+    if (t) $('p2b-site').textContent = t.business || t.id;
+    $('p2b-send').disabled = !p2bQueue.length || !!p2bBusy || !t;
+  }
+  function p2bChip(label) {
+    const el = document.createElement('span');
+    el.className = 'p2b-chip';
+    el.innerHTML = '<span class="nm"></span><span class="st">uploading…</span>';
+    el.querySelector('.nm').textContent = label.length > 26 ? label.slice(0, 24) + '…' : label;
+    $('p2b-chips').appendChild(el);
+    return el;
+  }
+  async function p2bUploadOne(file) {
+    const chip = p2bChip(file.name);
+    const st = chip.querySelector('.st');
+    try {
+      const sr = await fetch(API + '/api/uploads/sign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentType: file.type, size: file.size })
+      });
+      const sj = await sr.json().catch(() => ({}));
+      if (!sr.ok) throw new Error(sj.error || 'Upload rejected');
+      const pr = await fetch(sj.url, { method: 'PUT', headers: sj.headers, body: file });
+      if (!pr.ok) throw new Error('Upload failed (' + pr.status + ')');
+      p2bQueue.push({ name: sj.name, kind: file.type.indexOf('video') === 0 ? 'video' : 'image' });
+      chip.className = 'p2b-chip ok';
+      st.textContent = file.type.indexOf('video') === 0 ? '🎞 ready' : '📷 ready';
+    } catch (e) {
+      chip.className = 'p2b-chip bad';
+      st.textContent = String(e.message || 'failed').slice(0, 60);
+      setTimeout(() => chip.remove(), 6000);
+    } finally {
+      // In-flight → either queued (success, counted in p2bQueue) or dropped
+      // (failure — the cap slot comes back, mirroring the landing page).
+      p2bBusy--;
+      p2bPaint();
+    }
+  }
+  function p2bTake(list) {
+    for (const f of Array.from(list || [])) {
+      if (p2bQueue.length + p2bBusy >= 8) break; // MAX_FILES_PER_BUILD, same as intake
+      p2bBusy++;
+      p2bUploadOne(f);
+    }
+    p2bPaint();
+  }
+  async function p2bSend() {
+    const t = p2bTarget();
+    if (!t || !p2bQueue.length) return;
+    const status = $('p2b-status');
+    $('p2b-send').disabled = true;
+    status.style.display = 'block';
+    status.textContent = 'Theo is handing your photos to Leo…';
+    try {
+      const r = await fetch('/api/site-media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ siteId: t.id, media: p2bQueue.map(m => m.name) })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'The team couldn’t take the photos right now.');
+      status.textContent = j.status === 'applied'
+        ? 'Done — Leo re-rendered ' + (t.business || 'your site') + ' around your new photos. It’s live; refresh the preview to see it.'
+        : 'Got it — Theo filed the update and Leo has your photos queued. Your site refreshes on the team’s next update run; nothing else needed from you.';
+      p2bQueue = [];
+      $('p2b-chips').innerHTML = '';
+    } catch (e) {
+      status.textContent = String(e.message || 'Something went wrong — try again in a moment.').slice(0, 200);
+    } finally {
+      p2bPaint();
+    }
+  }
+  function p2bInit(acct) {
+    const panel = $('p2b');
+    if (!panel) return;
+    p2bOwned = (acct || []).filter(s => s && s.id);
+    if (!p2bOwned.length) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    p2bPaint();
+    if (panel.dataset.bound) return;
+    panel.dataset.bound = '1';
+    $('p2b-pick').addEventListener('click', () => $('p2b-files').click());
+    $('p2b-files').addEventListener('change', () => { p2bTake($('p2b-files').files); $('p2b-files').value = ''; });
+    $('p2b-send').addEventListener('click', p2bSend);
+    // Track the site switcher so the panel always names the selected site —
+    // our own listener, so selectSite() stays untouched (convoy-safe).
+    const sw = $('site-switch');
+    if (sw) sw.addEventListener('change', p2bPaint);
   }
 
   $('ask-go').addEventListener('click', ask);
