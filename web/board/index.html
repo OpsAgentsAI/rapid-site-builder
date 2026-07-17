@@ -210,6 +210,18 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 @media(prefers-reduced-motion:reduce){
   .drill-back,.drill-sheet{animation:none}
 }
+/* ===== mobile polish (card kP9hZRul) ===== */
+@media(max-width:640px){
+  .wrap{padding:18px 16px 56px}
+  .theo{padding:22px 18px;gap:20px}
+  .langbtn{min-height:44px}
+  /* 16px inputs: anything smaller makes iOS Safari auto-zoom on focus */
+  .ask input,.filter-search input{font-size:16px}
+  .ask button,.gate button,.chip{min-height:44px}
+  .filter-search{max-width:none}
+  .card .drag{padding:17px 16px;opacity:.7}
+  .back{display:inline-flex;padding:10px 4px;margin:-6px -4px}
+}
 </style>
 </head>
 <body>
