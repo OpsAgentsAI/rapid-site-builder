@@ -66,6 +66,13 @@ jobs:
           # to the OAuth client by hand (no API) and 404s sign-in until then — verified
           # 2026-06-30 (auth/unauthorized-domain → redirect_uri_mismatch). SESSION_SECRET
           # comes from Secret Manager, never an env literal.
+          #
+          # Cutover (ns341yIF): builder.opsagents.agency is the canonical front
+          # door. ALLOWED_ORIGINS carries both it and the web.app default (SSE
+          # builds call the Cloud Run URL cross-origin), and PUBLIC_BASE_URL
+          # mints published-site links on the custom domain. The comma inside
+          # ALLOWED_ORIGINS needs gcloud's custom-delimiter syntax (^|^) or the
+          # value parses as a new env pair — same fix as deploy.yml (4y97480y).
           gcloud run deploy "$SERVICE" \
             --source . \
             --project "$PROJECT_ID" \
@@ -73,7 +80,7 @@ jobs:
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
-            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=global,IMAGE_MODEL=gemini-3-pro-image-preview,WARM_KEY=${{ secrets.WARM_KEY }},FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com,PUBLIC_BASE_URL=https://rapid-site-builder-app.web.app,ALLOWED_ORIGINS=https://rapid-site-builder-app.web.app" \
+            --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://builder.opsagents.agency|ALLOWED_ORIGINS=https://builder.opsagents.agency,https://rapid-site-builder-app.web.app" \
             --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
