@@ -698,4 +698,27 @@
   renderTheo();
   renderTeam();
   renderMySites();
+
+  // "Keep your site live" (card KY2YTmoL): a signed-in free account with a
+  // configured checkout page gets one quiet upgrade chip in the top bar.
+  // Same-origin on purpose — the entitlement read rides the __session cookie
+  // through the Hosting rewrite. Silent no-op everywhere else (signed out,
+  // paid plan, auth-off deploy, checkout not configured). Copy is price-free.
+  (async () => {
+    try {
+      const r = await fetch('/api/entitlement', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.plan !== 'free' || !j.checkoutUrl) return;
+      const a = document.createElement('a');
+      a.id = 'keep-live';
+      a.href = j.checkoutUrl;
+      a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = '🚀 Keep your site live';
+      a.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:var(--brand-gradient);color:#fff;border-radius:var(--radius-pill);padding:8px 16px;font:700 13px var(--font-display);text-decoration:none;box-shadow:var(--shadow-sm)';
+      const crumb = document.querySelector('.top .crumb');
+      if (crumb) crumb.before(a);
+      else (document.querySelector('.top') || document.body).appendChild(a);
+    } catch { /* entitlement chip is best-effort — the board never breaks over it */ }
+  })();
 })();

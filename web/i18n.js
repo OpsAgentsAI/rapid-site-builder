@@ -103,7 +103,9 @@
       'dyn.purl.restore': '{business} — restored from this device',
       'dyn.pstate.restore': 'restored',
       'dyn.title.restore': 'Your site is back — publish when ready',
-      'dyn.yourbiz': 'your business'
+      'dyn.yourbiz': 'your business',
+      'upgrade.keep': 'Keep your site live',
+      'dyn.limit': 'Your free plan is full — upgrade to publish more sites.'
     },
     he: {
       'doc.title': 'Rapid Site Builder — צוות ה-AI שבונה לך אתר, בשידור חי',
@@ -185,7 +187,9 @@
       'dyn.purl.restore': '{business} — שוחזר מהמכשיר הזה',
       'dyn.pstate.restore': 'שוחזר',
       'dyn.title.restore': 'האתר שלך חזר — פרסמי כשתהיי מוכנה',
-      'dyn.yourbiz': 'העסק שלך'
+      'dyn.yourbiz': 'העסק שלך',
+      'upgrade.keep': 'שמרי על האתר שלך באוויר',
+      'dyn.limit': 'התוכנית החינמית שלך מלאה — שדרגי כדי לפרסם אתרים נוספים.'
     }
   };
 
