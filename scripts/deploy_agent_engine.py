@@ -9,7 +9,8 @@ Usage (any environment with ADC and the agents/requirements.txt installed):
 
 Prints the new reasoningEngine resource name — paste it into the app's
 AGENT_ENGINE_RESOURCE env var. Note: every create() mints a NEW engine; pin the
-printed resource and delete stale ones from the console.
+printed resource and delete stale ones from the console. Lifecycle, source of
+truth, audit and prune procedure: docs/ENGINES.md.
 
 Region note: Agent Engine availability is regional; us-central1 is a safe pick.
 GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION are RESERVED by the managed runtime
