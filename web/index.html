@@ -50,6 +50,9 @@ html{scroll-behavior:smooth}
 body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 h1,h2,h3{font-family:var(--font-display);letter-spacing:-.02em;line-height:1.15}
 .wrap{max-width:1180px;margin-inline:auto;padding-inline:24px;position:relative}
+/* wide-desktop fill (card VkeRMe4c): widen the wrap at >=1440px so the header spreads
+   and the build stage's preview column gets the extra room */
+@media(min-width:1440px){.wrap{max-width:clamp(1180px,92vw,1760px)}}
 header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 .head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
@@ -64,6 +67,8 @@ header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 #intake h1 em{font-style:normal;color:var(--brand-orange)}
 #intake .sub{color:var(--ink-2);font-size:clamp(15.5px,2vw,17.5px);max-width:62ch;margin:0 auto 36px}
 .formcard{max-width:780px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:30px;text-align:start;box-shadow:var(--shadow-pop)}
+/* wide-desktop fill (card VkeRMe4c): modest bump so the form doesn't float in ~570px side gutters at 1920px */
+@media(min-width:1440px){.formcard{max-width:860px}}
 .frow{display:grid;grid-template-columns:1.2fr .9fr;gap:14px;margin-bottom:14px}
 .frow.three{grid-template-columns:1fr .55fr .55fr}
 @media(max-width:640px){.frow,.frow.three{grid-template-columns:1fr}}

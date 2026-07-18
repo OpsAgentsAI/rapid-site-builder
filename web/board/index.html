@@ -33,6 +33,9 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 .wrap{max-width:1180px;margin-inline:auto;padding:24px 22px 64px}
+/* wide-desktop fill (card VkeRMe4c): the 1180px cap left ~370px dead gutters per side
+   at 1920px; widening the wrap lets the auto-fill team grid add columns */
+@media(min-width:1440px){.wrap{max-width:clamp(1180px,92vw,1760px)}}
 .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:19px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
 .wordmark .br{color:var(--brand-orange);font-weight:700}
