@@ -47,6 +47,8 @@ pip install -r agents/requirements.txt
 GOOGLE_CLOUD_PROJECT=<project> AGENT_ENGINE_STAGING_BUCKET=gs://<staging-bucket> \
   python scripts/deploy_agent_engine.py
 # → prints RESOURCE_NAME=projects/.../reasoningEngines/...
+# NOTE: every run mints a NEW engine — pin the printed resource, don't
+# recreate. Lifecycle + audit + prune runbook: docs/ENGINES.md
 
 # 2. Configure + run the app
 cp .env.example .env   # fill in the resource name + buckets + image project
