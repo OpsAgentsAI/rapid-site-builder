@@ -223,6 +223,19 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .p2b-chip.ok{border-color:color-mix(in srgb,var(--status-healthy) 45%,transparent);background:var(--status-healthy-soft)}
 .p2b-chip.bad{border-color:color-mix(in srgb,var(--status-stuck) 45%,transparent);background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
 #p2b .p2b-status{display:none;margin-top:11px;font-size:13px;color:var(--ink-2);line-height:1.55;background:var(--surface-sunken);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:10px 14px}
+
+/* ===== mobile polish (card kP9hZRul) ===== */
+@media(max-width:640px){
+  .wrap{padding:18px 16px 56px}
+  .theo{padding:22px 18px;gap:20px}
+  .langbtn{min-height:44px}
+  /* 16px inputs: anything smaller makes iOS Safari auto-zoom on focus */
+  .ask input,.filter-search input{font-size:16px}
+  .ask button,.gate button,.chip{min-height:44px}
+  .filter-search{max-width:none}
+  .card .drag{padding:17px 16px;opacity:.7}
+  .back{display:inline-flex;padding:10px 4px;margin:-6px -4px}
+}
 </style>
 </head>
 <body>
