@@ -23,6 +23,7 @@ const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadL
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
+const p2b = require('./lib/p2b-media');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -361,6 +362,12 @@ app.post('/api/uploads/sign', async (req, res) => {
   }
 });
 
+// P2b (card RzaCDxAa): a signed-in owner sends new photos to one of THEIR
+// sites. Ownership is verified server-side (session uid vs the site meta's
+// ownerUid) and a re-render request lands on the site meta; the engine is
+// NEVER called from this path — see lib/p2b-media.js.
+app.post('/api/site-media', p2b.siteMediaRoute({ auth, rateOk, uploadRateOk }));
+
 // ---- publish --------------------------------------------------------------------
 app.post('/api/publish', async (req, res) => {
   try {
@@ -403,6 +410,9 @@ app.post('/api/publish', async (req, res) => {
     // LLM-EO: publish llms.txt next to the HTML so AI assistants can read the
     // business at a glance (llmstxt.org). Non-fatal — the site is the product.
     try { await saveLlms(id, llmsTxt(spec, `${base}/sites/${id}`)); } catch { /* best-effort */ }
+    // P2b (card RzaCDxAa): keep the spec on file next to the HTML so "send the
+    // team new photos" can re-render this site later WITHOUT an engine run.
+    try { await p2b.saveSpec(id, spec); } catch { /* best-effort */ }
     res.json({ id, url: `${base}/sites/${id}` });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
