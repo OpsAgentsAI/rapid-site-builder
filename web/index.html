@@ -50,6 +50,9 @@ html{scroll-behavior:smooth}
 body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 h1,h2,h3{font-family:var(--font-display);letter-spacing:-.02em;line-height:1.15}
 .wrap{max-width:1180px;margin-inline:auto;padding-inline:24px;position:relative}
+/* wide-desktop fill (card VkeRMe4c): widen the wrap at >=1440px so the header spreads
+   and the build stage's preview column gets the extra room */
+@media(min-width:1440px){.wrap{max-width:clamp(1180px,92vw,1760px)}}
 header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 .head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
@@ -64,6 +67,8 @@ header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 #intake h1 em{font-style:normal;color:var(--brand-orange)}
 #intake .sub{color:var(--ink-2);font-size:clamp(15.5px,2vw,17.5px);max-width:62ch;margin:0 auto 36px}
 .formcard{max-width:780px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:30px;text-align:start;box-shadow:var(--shadow-pop)}
+/* wide-desktop fill (card VkeRMe4c): modest bump so the form doesn't float in ~570px side gutters at 1920px */
+@media(min-width:1440px){.formcard{max-width:860px}}
 .frow{display:grid;grid-template-columns:1.2fr .9fr;gap:14px;margin-bottom:14px}
 .frow.three{grid-template-columns:1fr .55fr .55fr}
 @media(max-width:640px){.frow,.frow.three{grid-template-columns:1fr}}
@@ -184,6 +189,24 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 [dir=rtl] .bub .msg{border-radius:14px 4px 14px 14px}
 [dir=rtl] .wordmark .br{display:inline-block;transform:scaleX(-1)}
 [dir=rtl] .agent .last,[dir=rtl] .preview .url,[dir=rtl] .bub pre{direction:rtl;text-align:start}
+/* ---------- mobile polish (card kP9hZRul) ---------- */
+@media(max-width:640px){
+  /* header: wordmark + lang on one row; tech badges collapse to one scrollable strip
+     instead of a 3-row stack that pushed the hero below the fold */
+  .head{padding-block:12px;gap:10px}
+  .badges{order:3;flex-basis:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-inline:-24px;padding-inline:24px}
+  .badges::-webkit-scrollbar{display:none}
+  .badge{flex:0 0 auto;white-space:nowrap;font-size:11.5px;padding:6px 12px}
+  .langbtn{min-height:44px}
+  #intake{padding:36px 0 48px}
+  .formcard{padding:22px 18px}
+  /* 16px inputs: anything smaller makes iOS Safari auto-zoom on focus */
+  input,select{font-size:16px}
+  .chip{min-height:44px}
+  .live-url .btn{min-height:44px}
+  .preview iframe{height:70vh}
+  footer.page a{display:inline-block;padding:12px 6px;margin:-12px -6px}
+}
 </style>
 </head>
 <body>
