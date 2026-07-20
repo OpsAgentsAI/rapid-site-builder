@@ -110,14 +110,64 @@ const CAT_DEFAULTS = {
   education: { vibe: 'fresh', layout: 'services', heading: 'What we teach', items: ['Core programs', 'Small groups', 'Personal mentoring'] },
   events: { vibe: 'bold', layout: 'services', heading: 'What we host', items: ['Private events', 'Celebrations', 'Full production'] }
 };
+// Hebrew twin of CAT_DEFAULTS — the deterministic draft/fallback must speak the
+// brief's language. Business-to-visitor voice is masculine plural (MSApps house
+// style); vibe/layout stay identical to the English table so the visual draft
+// is the same site in either language.
+const CAT_DEFAULTS_HE = {
+  food_beverage: { heading: 'מה מגישים אצלנו', items: ['המנות האהובות', 'טרי כל בוקר', 'בהכנה אישית'] },
+  retail: { heading: 'מה תמצאו אצלנו', items: ['נבחרו בקפידה', 'חדש על המדף', 'האהובים על הלקוחות'] },
+  beauty: { heading: 'הטיפולים שלנו', items: ['טיפולי דגל', 'טיפולי אקספרס', 'מנויים'] },
+  health: { heading: 'הטיפול שלנו', items: ['ייעוץ ואבחון', 'טיפולים', 'מעקב והמשך טיפול'] },
+  fitness: { heading: 'השיעורים שלנו', items: ['שיעורים קבוצתיים', 'אימון אישי', 'תוכניות למתחילים'] },
+  professional: { heading: 'מה אנחנו עושים', items: ['ייעוץ', 'ביצוע מקצה לקצה', 'ליווי שוטף'] },
+  tech: { heading: 'מה אנחנו בונים', items: ['המוצר', 'אינטגרציות', 'תמיכה שעונה'] },
+  real_estate: { heading: 'איך אנחנו עוזרים', items: ['קנייה', 'מכירה', 'ליווי מקצה לקצה'] },
+  education: { heading: 'מה אנחנו מלמדים', items: ['תוכניות ליבה', 'קבוצות קטנות', 'חונכות אישית'] },
+  events: { heading: 'מה אנחנו מארחים', items: ['אירועים פרטיים', 'חגיגות', 'הפקה מלאה'] }
+};
 function fallbackSpec(brief) {
-  const cat = CAT_DEFAULTS[brief.category] || CAT_DEFAULTS[inferCategory(brief.business + ' ' + brief.description)] || CAT_DEFAULTS.professional;
+  const catKey = CAT_DEFAULTS[brief.category] ? brief.category
+    : (CAT_DEFAULTS[inferCategory(brief.business + ' ' + brief.description)] ? inferCategory(brief.business + ' ' + brief.description) : 'professional');
+  const cat = CAT_DEFAULTS[catKey];
+  const he = brief.lang === 'he';
+  const vibe = brief.style !== 'default' && brief.style ? brief.style : cat.vibe;
+  if (he) {
+    // Hebrew brief → Hebrew draft, stamped lang/dir so the renderer goes RTL
+    // with Hebrew chrome. Before this branch existed, a Hebrew build's instant
+    // draft (and any engine-failure fallback) shipped a full English LTR site.
+    const heCat = CAT_DEFAULTS_HE[catKey] || CAT_DEFAULTS_HE.professional;
+    const name = brief.business || 'העסק שלך';
+    const desc = brief.description || 'משהו טוב בדרך.';
+    return {
+      business: name,
+      tagline: desc.slice(0, 90),
+      vibe,
+      layout: cat.layout,
+      about_heading: 'על ' + name,
+      about: desc + '. אנחנו שומרים על זה פשוט: לעשות את זה טוב, להתייחס לאנשים יפה, ולהיות שווים עוד ביקור.',
+      items_heading: heCat.heading,
+      items: heCat.items.map(n => ({ emoji: '', name: n, desc: 'שאלו אותנו — זה בדיוק מה שאנחנו אוהבים לעשות.', price: '' })),
+      why_heading: 'למה ' + name,
+      why: [
+        { emoji: '', title: 'אכפת לנו מהפרטים', text: 'דברים קטנים שנעשים נכון, בכל פעם מחדש.' },
+        { emoji: '', title: 'מקומיים ואישיים', text: 'אתם מדברים עם אנשים שיודעים איך קוראים לכם.' },
+        { emoji: '', title: 'קל להשיג אותנו', text: 'עונים מהר, בלי סחבת ובלי לרדוף.' }
+      ],
+      cta_heading: 'בואו להגיד שלום',
+      cta_text: 'נשמח להכיר אתכם.',
+      cta_button: 'דברו איתנו',
+      contact: { address: '', phone: '', email: '', hours: '' },
+      lang: 'he',
+      dir: 'rtl'
+    };
+  }
   const name = brief.business || 'Your Business';
   const desc = brief.description || 'Something good is coming.';
   return {
     business: name,
     tagline: desc.slice(0, 90),
-    vibe: brief.style !== 'default' && brief.style ? brief.style : cat.vibe,
+    vibe,
     layout: cat.layout,
     about_heading: 'About ' + name,
     about: desc.charAt(0).toUpperCase() + desc.slice(1) + '. We keep it simple: do it well, treat people right, and be worth coming back to.',
@@ -132,7 +182,8 @@ function fallbackSpec(brief) {
     cta_heading: 'Come say hello',
     cta_text: 'We would love to meet you.',
     cta_button: 'Get in touch',
-    contact: { address: '', phone: '', email: '', hours: '' }
+    contact: { address: '', phone: '', email: '', hours: '' },
+    lang: 'en'
   };
 }
 
@@ -203,7 +254,9 @@ app.post('/api/build', async (req, res) => {
         send({ type: 'media', items: userMedia });
         send({
           type: 'step', agent: 'layout_agent',
-          text: `The client sent ${userMedia.length} of their own ${userMedia.length === 1 ? 'file' : 'files'} — designing around real imagery instead of stock.`
+          text: brief.lang === 'he'
+            ? `הלקוחה שלחה ${userMedia.length === 1 ? 'קובץ אחד משלה' : userMedia.length + ' קבצים משלה'} — מעצבים סביב תמונות אמיתיות במקום סטוק.`
+            : `The client sent ${userMedia.length} of their own ${userMedia.length === 1 ? 'file' : 'files'} — designing around real imagery instead of stock.`
         });
       }
     }
@@ -223,13 +276,20 @@ app.post('/api/build', async (req, res) => {
     const result = await engine.runBuild(crewBrief, (step, phase) => {
       if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
       const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
-      // skip leftovers with no real content (e.g. a bare "---" divider after filtering)
-      if (text && /[a-zA-Z0-9]/.test(text)) send({ type: 'step', agent: step.agent, text });
+      // skip leftovers with no real content (e.g. a bare "---" divider after
+      // filtering). Unicode-aware on purpose: the old /[a-zA-Z0-9]/ check
+      // silently dropped every pure-Hebrew line from Hebrew builds' live feed.
+      if (text && /[\p{L}\p{N}]/u.test(text)) send({ type: 'step', agent: step.agent, text });
     });
     let spec = result.spec;
     if (!spec) {
       spec = fallbackSpec(brief);
-      send({ type: 'step', agent: 'opsagents_builder_orchestrator', text: 'Pulling the final draft together from the team\'s notes — one more moment.' });
+      send({
+        type: 'step', agent: 'opsagents_builder_orchestrator',
+        text: brief.lang === 'he'
+          ? 'מרכיבים את הטיוטה הסופית מהרשימות של הצוות — עוד רגע.'
+          : 'Pulling the final draft together from the team\'s notes — one more moment.'
+      });
     }
     const heroImage = userHero
       || await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
@@ -244,7 +304,12 @@ app.post('/api/build', async (req, res) => {
     // start → image → error → done left the user at a dead end (card aAp5r5af).
     console.warn('[build] engine failed, serving deterministic fallback:', String((e && e.message) || e).slice(0, 300));
     try {
-      send({ type: 'step', agent: 'opsagents_builder_orchestrator', text: 'The engine hit turbulence mid-run — assembling your draft from the team\'s playbook instead.' });
+      send({
+        type: 'step', agent: 'opsagents_builder_orchestrator',
+        text: brief.lang === 'he'
+          ? 'המנוע נתקל במערבולת באמצע הריצה — מרכיבים לך את הטיוטה מהפלייבוק של הצוות.'
+          : 'The engine hit turbulence mid-run — assembling your draft from the team\'s playbook instead.'
+      });
       const spec = fallbackSpec(brief);
       const heroImage = await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 8000))]);
       const html = render(spec, { heroImage });
@@ -541,4 +606,4 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`rapid-site-builder on :${PORT}`));
 }
 
-module.exports = { app, cleanBrief, limiter };
+module.exports = { app, cleanBrief, limiter, fallbackSpec };
