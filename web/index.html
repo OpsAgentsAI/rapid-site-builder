@@ -314,6 +314,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 <script src="/device.js"></script>
 <script src="/auth.js"></script>
 <script src="/analytics.js" defer></script>
+<script src="/posthog.js" defer></script>
 <script>
 (() => {
   // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
@@ -545,6 +546,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('pstate').className = 'pstate';
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (window.rsbTrack) rsbTrack('build_started', { category: brief.category || '' });
+    // PostHog activation event (card u4xmePAo): the funnel's build-request step.
+    if (window.rsbPH) rsbPH('site_build_requested', { category: brief.category || '', lang: brief.lang, has_media: (brief.media || []).length > 0 });
 
     // instant feedback — Theo greets before the first engine byte arrives
     phase(0);
@@ -647,6 +650,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       }
       if (!r.ok) throw new Error(j.error || 'Publish failed');
       if (window.rsbTrack) rsbTrack('site_published', { id: j.id || '' });
+      // PostHog activation event (card u4xmePAo): the funnel's publish step.
+      if (window.rsbPH) rsbPH('site_published', { id: j.id || '' });
       setPill('max', 'd', T('dyn.shipped.pill', { url: j.url }));
       agentsRan.add('max');
       lastByAgent.max = T('dyn.shipped.line', { url: j.url });
