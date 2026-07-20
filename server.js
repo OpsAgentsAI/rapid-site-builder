@@ -24,6 +24,7 @@ const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
+const posthog = require('./lib/posthog');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -32,6 +33,46 @@ const app = express();
 // XFF per request mints unlimited rate-limit identities (PR #3 security
 // review, finding 1).
 app.set('trust proxy', 1);
+
+// ---- PostHog ingest reverse-proxy (card u4xmePAo) --------------------------------
+// The browser sends events to a same-origin opaque path (/rp) so ad-blockers that
+// block the PostHog domain don't drop our analytics. This forwards them upstream:
+// /rp/static/* → the assets host, everything else → the ingest host. Mounted
+// BEFORE express.json() so the raw request body (posthog-js sends its own JSON /
+// form encodings) is streamed through untouched. No-op-friendly: if POSTHOG_HOST
+// is a bad value the fetch simply fails and posthog-js drops the event.
+const PH_INGEST_HOST = (process.env.POSTHOG_HOST || 'https://us.i.posthog.com').replace(/\/$/, '');
+const PH_ASSETS_HOST = PH_INGEST_HOST.replace('.i.posthog.com', '-assets.i.posthog.com');
+app.use('/rp', async (req, res) => {
+  const upstreamBase = req.path.startsWith('/static/') ? PH_ASSETS_HOST : PH_INGEST_HOST;
+  const target = upstreamBase + req.originalUrl.replace(/^\/rp/, '');
+  try {
+    const headers = {};
+    // Forward content-type and the real client IP; strip hop-by-hop + host so the
+    // upstream sees its own host and doesn't choke on our proxy chain.
+    if (req.get('content-type')) headers['content-type'] = req.get('content-type');
+    if (req.ip) headers['x-forwarded-for'] = String(req.ip);
+    const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+    const upstream = await fetch(target, {
+      method: req.method,
+      headers,
+      body: hasBody ? req : undefined,
+      duplex: hasBody ? 'half' : undefined,
+      signal: AbortSignal.timeout(15000)
+    });
+    res.status(upstream.status);
+    const ct = upstream.headers.get('content-type');
+    if (ct) res.set('content-type', ct);
+    const cc = upstream.headers.get('cache-control');
+    if (cc) res.set('cache-control', cc);
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.send(buf);
+  } catch (e) {
+    // Analytics ingest failing must never surface to the user as an app error.
+    res.status(502).end();
+  }
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'web'), { index: false }));
 
@@ -225,6 +266,15 @@ app.post('/api/build', async (req, res) => {
   const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* client gone */ } };
   const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* noop */ } }, 15000);
 
+  // PostHog server-side (card u4xmePAo): an anonymous per-build id + a trace id
+  // that groups every $ai_generation of this run. No PII; no extra Agent Engine
+  // calls — the trace id is a locally-minted run id. NO-OP when POSTHOG_KEY unset.
+  const phId = 'build_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const aiTraceId = phId;
+  posthog.capture(phId, 'site_build_requested', {
+    category: brief.category, lang: brief.lang, has_media: brief.media.length > 0
+  });
+
   // Hero image resolves in parallel with the crew run — a cache hit lands in
   // milliseconds; a miss generates without ever blocking the build.
   const imageCategory = brief.category === 'other'
@@ -274,7 +324,14 @@ app.post('/api/build', async (req, res) => {
     };
     let lastPhase = -1;
     const result = await engine.runBuild(crewBrief, (step, phase) => {
-      if (phase !== lastPhase) { lastPhase = phase; send({ type: 'phase', n: phase }); }
+      if (phase !== lastPhase) {
+        lastPhase = phase;
+        send({ type: 'phase', n: phase });
+        // One $ai_generation per crew phase (LLM analytics, card u4xmePAo). The
+        // trace id is the local run id — this rides the callback the engine
+        // already fires; it makes NO extra Agent Engine calls. No-op if disabled.
+        posthog.captureAiGeneration(phId, aiTraceId, { $ai_span_name: 'agent_engine_phase_' + phase, phase, lang: brief.lang });
+      }
       const text = brief.lang === 'he' ? step.text : englishOnly(step.text);
       // skip leftovers with no real content (e.g. a bare "---" divider after
       // filtering). Unicode-aware on purpose: the old /[a-zA-Z0-9]/ check
@@ -295,6 +352,7 @@ app.post('/api/build', async (req, res) => {
       || await Promise.race([heroPromise, new Promise(r => setTimeout(() => r(null), 20000))]);
     const html = render(spec, { heroImage, userMedia });
     send({ type: 'site', spec, heroImage: heroImage || null, userMedia, html });
+    posthog.capture(phId, 'site_build_completed', { category: brief.category, lang: brief.lang, used_fallback: !result.spec });
   } catch (e) {
     // Reliability floor (charter): a build never ends in a bare error. The
     // spec-parse fallback above only covers a crew run that FINISHED without a
@@ -303,6 +361,8 @@ app.post('/api/build', async (req, res) => {
     // flagged with an honest system line. Witnessed live 2026-06-11 17:31 UTC:
     // start → image → error → done left the user at a dead end (card aAp5r5af).
     console.warn('[build] engine failed, serving deterministic fallback:', String((e && e.message) || e).slice(0, 300));
+    // Server-side error tracking (card u4xmePAo) — no-op when PostHog is off.
+    posthog.captureException(e, phId, { route: '/api/build', category: brief.category });
     try {
       send({
         type: 'step', agent: 'opsagents_builder_orchestrator',
@@ -473,8 +533,13 @@ app.post('/api/publish', async (req, res) => {
     // LLM-EO: publish llms.txt next to the HTML so AI assistants can read the
     // business at a glance (llmstxt.org). Non-fatal — the site is the product.
     try { await saveLlms(id, llmsTxt(spec, `${base}/sites/${id}`)); } catch { /* best-effort */ }
+    // Publish activation event, server-side (card u4xmePAo). The client also
+    // emits site_published (rsbPH) — both fire so the funnel is covered even if
+    // the browser closes right after the request lands. No-op when disabled.
+    posthog.capture('publish_' + id, 'site_published', { id, business: String(spec.business).slice(0, 120), signed_in: !!session });
     res.json({ id, url: `${base}/sites/${id}` });
   } catch (e) {
+    posthog.captureException(e, 'publish', { route: '/api/publish' });
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
   }
 });
@@ -529,6 +594,7 @@ app.post('/api/ask', async (req, res) => {
     }
     res.json({ reply: out.slice(0, 1200) });
   } catch (e) {
+    posthog.captureException(e, 'ask', { route: '/api/ask' });
     res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
   }
 });
@@ -595,15 +661,28 @@ app.get('/api/health', (_req, res) => res.json({
 // Client runtime config (card WZtm0jA3): the GA4 Measurement ID this deployment
 // is wired to, read by web/analytics.js. Empty string when unset → analytics is
 // a no-op, so a judge cloning the public repo runs with zero tracking config.
+// PostHog (card u4xmePAo): the project key + ingest host read by web/posthog.js.
+// Empty key → posthog-js stays a no-op. NEVER a personal phx_ key — a project
+// key (phc_…) for an OpsAgents PostHog project, bound at deploy by an operator.
 app.get('/api/client-config', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=300');
-  res.json({ ga4Id: process.env.GA4_MEASUREMENT_ID || '' });
+  res.json({
+    ga4Id: process.env.GA4_MEASUREMENT_ID || '',
+    posthogKey: process.env.POSTHOG_KEY || '',
+    posthogHost: process.env.POSTHOG_HOST || 'https://us.i.posthog.com'
+  });
 });
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`rapid-site-builder on :${PORT}`));
+  // Flush buffered PostHog events before the Cloud Run instance freezes/exits
+  // (card u4xmePAo AC #6). Both signals so SIGTERM (Cloud Run scale-down) and
+  // SIGINT (local Ctrl-C) drain. No-op when PostHog is disabled.
+  for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.on(sig, async () => { await posthog.shutdown(); process.exit(0); });
+  }
 }
 
 module.exports = { app, cleanBrief, limiter, fallbackSpec };
