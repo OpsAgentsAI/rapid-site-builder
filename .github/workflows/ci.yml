@@ -1,18 +1,21 @@
 name: CI
 
-# Gates every PR to main on the unit/integration suite. preview.yml only deploys
-# a Hosting preview channel and smoke-tests /board + /api/health — it never runs
-# `npm test`, so backend PRs touching lib/*.js (e.g. the uploads hardening in
-# #17/#18) could merge green without their tests ever executing. This job closes
-# that gap: zero-dep `node --test` runs in seconds. Mark it a required status
-# check in branch protection so a red suite blocks merge (rule #22: the merge
-# gate is green CI on the head SHA — that "green" must include the tests).
+# Gates every PR to a long-lived branch (main, real-app) on the unit/integration
+# suite. preview.yml only deploys a Hosting preview channel and smoke-tests
+# /board + /api/health — it never runs `npm test`, so backend PRs touching
+# lib/*.js (e.g. the uploads hardening in #17/#18) could merge green without
+# their tests ever executing. This job closes that gap: zero-dep `node --test`
+# runs in seconds. Mark it a required status check in branch protection so a red
+# suite blocks merge (rule #22: the merge gate is green CI on the head SHA —
+# that "green" must include the tests). real-app was added after PR #40 merged
+# with ZERO checks: it is the auth-ON production branch (cutover ns341yIF) and
+# must never merge untested (card I3WuY6w1).
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, real-app]
   push:
-    branches: [main]
+    branches: [main, real-app]
 
 permissions:
   contents: read

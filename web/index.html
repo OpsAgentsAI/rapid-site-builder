@@ -50,6 +50,9 @@ html{scroll-behavior:smooth}
 body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 h1,h2,h3{font-family:var(--font-display);letter-spacing:-.02em;line-height:1.15}
 .wrap{max-width:1180px;margin-inline:auto;padding-inline:24px;position:relative}
+/* wide-desktop fill (card VkeRMe4c): widen the wrap at >=1440px so the header spreads
+   and the build stage's preview column gets the extra room */
+@media(min-width:1440px){.wrap{max-width:clamp(1180px,92vw,1760px)}}
 header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 .head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
@@ -64,6 +67,8 @@ header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 #intake h1 em{font-style:normal;color:var(--brand-orange)}
 #intake .sub{color:var(--ink-2);font-size:clamp(15.5px,2vw,17.5px);max-width:62ch;margin:0 auto 36px}
 .formcard{max-width:780px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2xl);padding:30px;text-align:start;box-shadow:var(--shadow-pop)}
+/* wide-desktop fill (card VkeRMe4c): modest bump so the form doesn't float in ~570px side gutters at 1920px */
+@media(min-width:1440px){.formcard{max-width:860px}}
 .frow{display:grid;grid-template-columns:1.2fr .9fr;gap:14px;margin-bottom:14px}
 .frow.three{grid-template-columns:1fr .55fr .55fr}
 @media(max-width:640px){.frow,.frow.three{grid-template-columns:1fr}}
@@ -184,6 +189,25 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 [dir=rtl] .bub .msg{border-radius:14px 4px 14px 14px}
 [dir=rtl] .wordmark .br{display:inline-block;transform:scaleX(-1)}
 [dir=rtl] .agent .last,[dir=rtl] .preview .url,[dir=rtl] .bub pre{direction:rtl;text-align:start}
+[dir=rtl] .agent.working{transform:translateX(-4px)}
+/* ---------- mobile polish (card kP9hZRul) ---------- */
+@media(max-width:640px){
+  /* header: wordmark + lang on one row; tech badges collapse to one scrollable strip
+     instead of a 3-row stack that pushed the hero below the fold */
+  .head{padding-block:12px;gap:10px}
+  .badges{order:3;flex-basis:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-inline:-24px;padding-inline:24px}
+  .badges::-webkit-scrollbar{display:none}
+  .badge{flex:0 0 auto;white-space:nowrap;font-size:11.5px;padding:6px 12px}
+  .langbtn{min-height:44px}
+  #intake{padding:36px 0 48px}
+  .formcard{padding:22px 18px}
+  /* 16px inputs: anything smaller makes iOS Safari auto-zoom on focus */
+  input,select{font-size:16px}
+  .chip{min-height:44px}
+  .live-url .btn{min-height:44px}
+  .preview iframe{height:70vh}
+  footer.page a{display:inline-block;padding:12px 6px;margin:-12px -6px}
+}
 </style>
 </head>
 <body>
@@ -235,7 +259,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       </div>
       <div class="mediarow">
         <label for="mfiles"><span data-i18n="media.label">Your photos &amp; videos</span> <span class="opt" data-i18n="media.opt">(optional — the team features them on your site)</span></label>
-        <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos">
+        <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos" data-i18n-aria="media.aria">
           <input id="mfiles" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden/>
           <span data-i18n="media.drop">Drop files here or</span> <button type="button" class="linklike" id="mpick" data-i18n="media.browse">browse</button> <span data-i18n="media.limits">— up to 8 · photos ≤15MB · video ≤100MB</span>
         </div>
@@ -290,6 +314,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 <script src="/device.js"></script>
 <script src="/auth.js"></script>
 <script src="/analytics.js" defer></script>
+<script src="/posthog.js" defer></script>
 <script>
 (() => {
   // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
@@ -341,7 +366,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   function mediaChip(file) {
     const el = document.createElement('span');
     el.className = 'mchip up';
-    el.innerHTML = '<span class="nm"></span><span class="st">uploading…</span>';
+    el.innerHTML = '<span class="nm"></span><span class="st"></span>';
+    el.querySelector('.st').textContent = T('media.uploading');
     el.querySelector('.nm').textContent = file.name.length > 26 ? file.name.slice(0, 24) + '…' : file.name;
     $('mchips').appendChild(el);
     return el;
@@ -360,7 +386,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       if (!pr.ok) throw new Error('Upload failed (' + pr.status + ')');
       MEDIA.push({ name: sj.name, kind: file.type.indexOf('video') === 0 ? 'video' : 'image' });
       chip.className = 'mchip ok';
-      st.textContent = file.type.indexOf('video') === 0 ? '🎞 ready' : '📷 ready';
+      st.textContent = file.type.indexOf('video') === 0 ? T('media.ready.video') : T('media.ready.photo');
     } catch (e) {
       mediaCount--;
       chip.className = 'mchip bad';
@@ -432,7 +458,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       const target = personaOf(personaFor(hand[1]));
       const line = document.createElement('div');
       line.className = 'sysline';
-      line.textContent = `${p.name} brings in ${target ? target.name : hand[1]}`;
+      line.textContent = T('feed.brings', { a: p.name, b: target ? target.name : hand[1] });
       pushBubble(line);
       return;
     }
@@ -454,11 +480,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       // tool calls become a soft "working" chip; args fold away
       const chip = document.createElement('span');
       chip.className = 'tool';
-      chip.innerHTML = `<i></i>working: ${tool[1].replace(/_/g, ' ')}`;
+      chip.innerHTML = '<i></i>';
+      chip.appendChild(document.createTextNode(T('feed.working', { tool: tool[1].replace(/_/g, ' ') })));
       msg.appendChild(chip);
       if (tool[2] && tool[2].trim().length > 3) {
         const det = document.createElement('details');
-        det.innerHTML = `<summary>details</summary>`;
+        det.innerHTML = '<summary></summary>';
+        det.querySelector('summary').textContent = T('feed.details');
         const pre = document.createElement('pre');
         pre.textContent = tool[2].slice(0, 500);
         det.appendChild(pre);
@@ -467,7 +495,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     } else if (jsonish) {
       // structured results fold behind a tap — proof without the wall of JSON
       const det = document.createElement('details');
-      det.innerHTML = `<summary>shared structured results</summary>`;
+      det.innerHTML = '<summary></summary>';
+      det.querySelector('summary').textContent = T('feed.results');
       const pre = document.createElement('pre');
       pre.textContent = text.slice(0, 700);
       det.appendChild(pre);
@@ -517,6 +546,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('pstate').className = 'pstate';
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (window.rsbTrack) rsbTrack('build_started', { category: brief.category || '' });
+    // PostHog activation event (card u4xmePAo): the funnel's build-request step.
+    if (window.rsbPH) rsbPH('site_build_requested', { category: brief.category || '', lang: brief.lang, has_media: (brief.media || []).length > 0 });
 
     // instant feedback — Theo greets before the first engine byte arrives
     phase(0);
@@ -619,10 +650,12 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       }
       if (!r.ok) throw new Error(j.error || 'Publish failed');
       if (window.rsbTrack) rsbTrack('site_published', { id: j.id || '' });
-      setPill('max', 'd', 'shipped ' + j.url);
+      // PostHog activation event (card u4xmePAo): the funnel's publish step.
+      if (window.rsbPH) rsbPH('site_published', { id: j.id || '' });
+      setPill('max', 'd', T('dyn.shipped.pill', { url: j.url }));
       agentsRan.add('max');
-      lastByAgent.max = 'Shipped the site live: ' + j.url;
-      feedByAgent.max = ['render(spec) → single-file HTML', 'saved to site store', 'live at ' + j.url.replace(/^https?:\/\//, '')];
+      lastByAgent.max = T('dyn.shipped.line', { url: j.url });
+      feedByAgent.max = [T('feed.max.0'), T('feed.max.1'), T('feed.max.2', { url: j.url.replace(/^https?:\/\//, '') })];
       $('live-a').textContent = j.url; $('live-a').href = j.url;
       $('live').style.display = 'flex';
       $('publish').style.display = 'none';
@@ -662,7 +695,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     try { saved = JSON.parse(localStorage.getItem('last_build') || 'null'); } catch { /* noop */ }
     if (!saved || !saved.spec || !saved.html) return;
     if (Date.now() - (saved.at || 0) > 7 * 24 * 3600 * 1000) return; // a week-old draft is stale
-    $('restore-name').textContent = saved.spec.business || 'your site';
+    $('restore-name').textContent = saved.spec.business || T('dyn.yourbiz');
     $('restore').style.display = 'block';
     $('restore-go').addEventListener('click', () => {
       lastBuild = { spec: saved.spec, heroImage: saved.heroImage, html: saved.html, userMedia: saved.userMedia || [] };
