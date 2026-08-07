@@ -59,31 +59,38 @@ app.use('/api', (req, res, next) => {
 // /sites/* fine — those are quick GETs, not streams).
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-// ---- simple per-IP rate limits ---------------------------------------------------
+// ---- simple per-IP / per-uid rate limits -----------------------------------------
 const RATE_MAX = Number(process.env.BUILDS_PER_HOUR_PER_IP) || 12;
 const UPLOAD_RATE_MAX = Number(process.env.UPLOADS_PER_HOUR_PER_IP) || 30;
-function limiter(max) {
-  const hits = new Map(); // ip -> [timestamps]
+const PUBLISH_RATE_MAX = Number(process.env.PUBLISHES_PER_DAY_PER_UID) || 10;
+function limiter(max, windowMs = 3600_000) {
+  const hits = new Map(); // key -> [timestamps]
   // req.ip honors trust-proxy(1): the GFE-appended XFF entry, not the
   // spoofable leftmost hop. Never parse X-Forwarded-For by hand here.
-  const key = (req) => String(req.ip || '').trim() || 'unknown';
-  const live = (ip, now) => (hits.get(ip) || []).filter(t => now - t < 3600_000);
-  const take = (req) => {
-    const ip = key(req);
+  // A plain string keys the bucket directly (per-uid budgets, card ns341yIF).
+  const key = (r) => typeof r === 'string' ? r : String((r && r.ip) || '').trim() || 'unknown';
+  const live = (k, now) => (hits.get(k) || []).filter(t => now - t < windowMs);
+  const take = (r) => {
+    const k = key(r);
     const now = Date.now();
-    const arr = live(ip, now);
+    const arr = live(k, now);
     if (arr.length >= max) return false;
     arr.push(now);
-    hits.set(ip, arr);
+    hits.set(k, arr);
     if (hits.size > 5000) hits.clear(); // crude memory guard
     return true;
   };
   // Non-consuming check: lets one budget gate another route without burning a slot.
-  take.peek = (req) => live(key(req), Date.now()).length < max;
+  take.peek = (r) => live(key(r), Date.now()).length < max;
   return take;
 }
 const rateOk = limiter(RATE_MAX);         // builds are the expensive op
 const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
+// Publishing writes durable objects to the public sites bucket — cap it per
+// rolling day. Keyed per-uid on the auth-ON surface (the signed-in account is
+// the stable identity there); falls back to per-IP when auth is off (local
+// dev, judge clone), so the cap holds on every deployment shape (ns341yIF).
+const publishRateOk = limiter(PUBLISH_RATE_MAX, 86_400_000);
 
 // For English builds, drop Hebrew lines from streamed agent text — the deployed
 // crew's copy agent drafts bilingually by instruction; the English-only surface
@@ -378,6 +385,11 @@ app.post('/api/publish', async (req, res) => {
     if (auth.AUTH_ENABLED && (!session || !session.uid)) {
       return res.status(401).set('Cache-Control', 'private, no-store')
         .json({ error: 'Sign in to publish your site.', signin: true });
+    }
+    // Abuse cap (ns341yIF): checked after the auth gate so an unauthenticated
+    // probe can never burn a signed-in user's bucket slot.
+    if (!publishRateOk(session && session.uid ? `uid:${session.uid}` : req)) {
+      return res.status(429).json({ error: 'Publish limit reached for today — try again tomorrow.' });
     }
     const spec = req.body && req.body.spec;
     if (!spec || !spec.business) return res.status(400).json({ error: 'Missing site spec to publish.' });
