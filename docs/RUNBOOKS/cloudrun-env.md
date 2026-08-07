@@ -21,6 +21,7 @@ a durable change must be made.
 | `AGENT_ENGINE_RESOURCE` | GH repo secret `AGENT_ENGINE_RESOURCE` |
 | `SITE_IMAGES_BUCKET` / `PUBLISHED_SITES_BUCKET` / `IMAGE_PROJECT` / `WARM_KEY` | GH repo secrets (same names) |
 | `IMAGE_REGION`, `IMAGE_MODEL`, `PUBLIC_BASE_URL`, `ALLOWED_ORIGINS` | hardcoded in `deploy.yml` |
+| `PUBLIC_MEDIA_BASE_URL` | GH repo secret (same name). Empty/unset = media URLs stay direct `storage.googleapis.com` form. Set only after the nosniff CDN/LB layer is live — see [`public-media-nosniff.md`](./public-media-nosniff.md) |
 | `SESSION_SECRET` (and future Secret Manager mounts) | `--update-secrets` in `deploy.yml` → Secret Manager; rotate by adding a secret **version**, not by editing env |
 
 ## Durable change procedure

@@ -25,6 +25,7 @@ const auth = require('./lib/auth');
 const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
 const posthog = require('./lib/posthog');
+const { PUBLIC_MEDIA_BASE_URL: MEDIA_BASE } = require('./lib/publicMedia');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -653,6 +654,9 @@ app.get('/api/health', (_req, res) => res.json({
   agentEngine: engine.ENABLED,
   imagesBucket: !!process.env.SITE_IMAGES_BUCKET,
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
+  // true only when PUBLIC_MEDIA_BASE_URL passed lib/publicMedia's https-origin
+  // validation — the operator's post-flip verification signal (card 7KlXAiW0).
+  publicMediaBase: !!MEDIA_BASE,
   auth: auth.AUTH_ENABLED,
   admin: auth.AUTH_ENABLED || !!process.env.ADMIN_KEY,
   uploadsBucket: uploads.ENABLED,
