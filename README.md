@@ -8,7 +8,7 @@
 
 Built for the Google Cloud Rapid Agent Hackathon (Arize track). Submitted state: tag [`devpost-submission`](../../releases/tag/devpost-submission); development continues on main. Google-native end to end:
 
-- **Google Cloud Agent Builder (ADK)** — a five-specialist crew orchestrated by `site_builder_orchestrator`, deployed on **Vertex AI Agent Engine**
+- **Google Cloud Agent Builder (ADK)** — an eight-specialist crew orchestrated by `site_builder_orchestrator`, deployed on **Vertex AI Agent Engine**. The design trio — Dana (UX flow) · Remy (visual system) · Kai (frontend checks) — joins the build conversation once the serving engine carries them (`BUILDER_DESIGN_TRIO=1`).
 - **Gemini 3** for every agent turn (`gemini-3-flash-preview`, routed to the global Vertex endpoint from inside the pickled crew), plus **Nano Banana Pro (`gemini-3-pro-image-preview`)** for hero photography (GCS-cached by business category)
 - **Arize Phoenix MCP** (partner integration) — the observability agent records every build run through Phoenix's MCP server
 - No other AI anywhere.
