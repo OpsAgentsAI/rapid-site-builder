@@ -3,6 +3,21 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!-- Google Analytics 4 (GA4) — RSB Builder property 549064186, stream builder.opsagents.agency. Raw canonical gtag.js (house rule: never firebase-analytics SDK). Measurement ID is public client config. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-8ZV9B6NH11"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){ dataLayer.push(arguments); }
+  gtag('js', new Date());
+  gtag('config', 'G-8ZV9B6NH11');
+  // Web error-tracking baseline (Crashlytics is native-only) — exception events, no PII.
+  window.addEventListener('error', function(e){
+    gtag('event', 'exception', { description: (e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||0)).slice(0,150), fatal: false });
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    gtag('event', 'exception', { description: ('unhandledrejection: ' + String(e && e.reason)).slice(0,150), fatal: false });
+  });
+</script>
 <title>Rapid Site Builder — your AI web team, live</title>
 <meta name="description" content="Describe your business in one line. A Google Cloud agent team designs, writes, and ships your website in front of you — free."/>
 <link rel="canonical" href="https://rapid-site-builder.web.app/"/>
