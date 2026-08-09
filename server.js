@@ -19,7 +19,8 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner, loadSiteMeta, saveSiteDomain } = require('./lib/store');
+const domains = require('./lib/domains');
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
@@ -375,6 +376,92 @@ app.post('/api/uploads/sign', async (req, res) => {
 // NEVER called from this path — see lib/p2b-media.js.
 app.post('/api/site-media', p2b.siteMediaRoute({ auth, rateOk, uploadRateOk }));
 
+// ---- connect-your-domain (card DYE9159z) ----------------------------------------
+// A paid-tier owner attaches an owned domain to one of THEIR published sites via
+// the Firebase Hosting customDomains REST API, then polls attach/DNS/TLS state.
+// Auto-TLS is Firebase's — we only surface cert state and translate the required
+// DNS records for the guided copy-paste flow (see lib/domains.js + the runbook).
+//
+// Gate order is deliberate and fail-closed:
+//   1. auth configured + valid session (never anonymous — a domain needs an owner)
+//   2. paid tier (custom domains are a paid capability)
+//   3. ownership: the session uid must equal the site meta's ownerUid
+// so an unauthenticated or non-owning probe can never touch another user's domain.
+async function resolveDomainOwner(req, res, siteId) {
+  if (!domains.ENABLED) {
+    res.status(503).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Custom domains are not configured on this deployment.' });
+    return null;
+  }
+  if (!auth.AUTH_ENABLED) {
+    res.status(503).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Sign-in must be configured to connect a domain.' });
+    return null;
+  }
+  const session = auth.sessionFromReq(req);
+  if (!session || !session.uid) {
+    res.status(401).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Sign in to connect a domain.', signin: true });
+    return null;
+  }
+  if (!domains.isPaid(session.uid)) {
+    res.status(403).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Connecting a custom domain is a paid-plan feature.', upgrade: true });
+    return null;
+  }
+  if (!/^[a-f0-9]{8}$/.test(String(siteId))) {
+    res.status(400).set('Cache-Control', 'private, no-store').json({ error: 'Bad site id.' });
+    return null;
+  }
+  const meta = await loadSiteMeta(siteId);
+  if (!meta || meta.ownerUid !== session.uid) {
+    // Same 404 for "no such site" and "not yours" — never reveal another
+    // owner's site exists (mirrors p2b-media ownership handling).
+    res.status(404).set('Cache-Control', 'private, no-store').json({ error: 'Site not found.' });
+    return null;
+  }
+  return { session, meta };
+}
+
+app.post('/api/domains/connect', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  const siteId = String((req.body && req.body.siteId) || '');
+  const ctx = await resolveDomainOwner(req, res, siteId);
+  if (!ctx) return;
+  const host = domains.normalizeHost((req.body && req.body.domain) || '');
+  if (!host) return res.status(400).json({ error: 'Enter a valid domain you own, e.g. shop.example.com.' });
+  try {
+    const summary = await domains.attachCustomDomain(host);
+    // Persist the attach state on the site meta so /board can paint it without
+    // re-hitting Hosting; best-effort — the live summary is what we return.
+    await saveSiteDomain(siteId, summary).catch(() => { /* meta stamp is best-effort */ });
+    res.json({ ok: true, domain: summary });
+  } catch (e) {
+    res.status((e && e.status) || 502).json({ error: String((e && e.message) || e).slice(0, 300) });
+  }
+});
+
+app.get('/api/domains/status', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  const siteId = String(req.query.siteId || '');
+  const ctx = await resolveDomainOwner(req, res, siteId);
+  if (!ctx) return;
+  // Which domain to poll: the explicit query wins, else the one on record.
+  const onRecord = ctx.meta.domain && ctx.meta.domain.host;
+  const host = domains.normalizeHost(req.query.domain || onRecord || '');
+  if (!host) return res.json({ ok: true, domain: null }); // nothing connected yet
+  try {
+    const summary = await domains.getCustomDomain(host);
+    await saveSiteDomain(siteId, summary).catch(() => { /* best-effort refresh */ });
+    res.json({ ok: true, domain: summary });
+  } catch (e) {
+    // A not-yet-created domain reads as 404 from Hosting — report "none" rather
+    // than an error so the board shows the connect form, not a failure.
+    if (e && e.status === 404) return res.json({ ok: true, domain: null });
+    res.status((e && e.status) || 502).json({ error: String((e && e.message) || e).slice(0, 300) });
+  }
+});
+
 // ---- publish --------------------------------------------------------------------
 app.post('/api/publish', async (req, res) => {
   try {
@@ -507,6 +594,7 @@ app.get('/api/health', (_req, res) => res.json({
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
   auth: auth.AUTH_ENABLED,
   uploadsBucket: uploads.ENABLED,
+  customDomains: domains.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));

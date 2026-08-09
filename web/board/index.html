@@ -242,6 +242,32 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .p2b-chip.bad{border-color:color-mix(in srgb,var(--status-stuck) 45%,transparent);background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
 #p2b .p2b-status{display:none;margin-top:11px;font-size:13px;color:var(--ink-2);line-height:1.55;background:var(--surface-sunken);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:10px 14px}
 
+/* ===== connect-your-domain panel (card DYE9159z) ===== */
+#dom{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:24px}
+#dom .dom-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px}
+#dom .dom-head b{font:700 14px var(--font-display)}
+#dom .dom-head .tgt{font-size:12px;color:var(--ink-3)}
+#dom .dom-head .tgt b{font-size:12px;color:var(--ink-2)}
+#dom .dom-sub{font-size:13px;color:var(--ink-3);margin:0 0 12px;line-height:1.5}
+#dom .dom-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#dom input[type=text]{flex:1;min-width:200px;min-height:36px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font:500 14px var(--font-mono);color:var(--ink-1);background:var(--surface-sunken)}
+#dom button{min-height:36px;padding:0 15px;border-radius:var(--radius-sm);font:600 13px var(--font-body);cursor:pointer;color:#fff;background:var(--brand-gradient);border:0;font-weight:700}
+#dom button:disabled{opacity:.55;cursor:not-allowed}
+#dom .dom-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.dom-badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-pill);padding:5px 12px;font-size:12px;color:var(--ink-2);background:var(--surface-sunken)}
+.dom-badge .k{color:var(--ink-3);font-weight:600}
+.dom-badge.live{border-color:color-mix(in srgb,var(--status-healthy) 45%,transparent);background:var(--status-healthy-soft)}
+.dom-badge.securing{border-color:color-mix(in srgb,var(--brand-orange) 45%,transparent)}
+.dom-badge.conflict{border-color:color-mix(in srgb,var(--status-stuck) 45%,transparent);background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
+#dom .dom-dns{display:none;margin-top:13px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}
+#dom .dom-dns h4{margin:0 0 8px;font:700 13px var(--font-display);color:var(--ink-1)}
+#dom .dom-dns p{margin:0 0 10px;font-size:12.5px;color:var(--ink-3);line-height:1.5}
+#dom table.dns{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px}
+#dom table.dns th{text-align:start;color:var(--ink-3);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--border)}
+#dom table.dns td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--ink-2);vertical-align:top;word-break:break-all}
+#dom table.dns td .cp{cursor:pointer;color:var(--brand-orange);font-family:var(--font-body);font-size:11px;font-weight:700;margin-inline-start:6px;user-select:none}
+#dom .dom-status{display:none;margin-top:11px;font-size:13px;color:var(--ink-2);line-height:1.55;background:var(--surface-sunken);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:10px 14px}
+
 /* ===== mobile polish (card kP9hZRul) ===== */
 @media(max-width:640px){
   .wrap{padding:18px 16px 56px}
@@ -329,6 +355,26 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
     </div>
     <div class="p2b-chips" id="p2b-chips"></div>
     <div class="p2b-status" id="p2b-status" role="status"></div>
+  </div>
+
+  <!-- Connect-your-domain (card DYE9159z) — paid-tier, owned sites only -->
+  <div id="dom">
+    <div class="dom-head">
+      <b>🌐 Connect your own domain</b>
+      <span class="tgt">for <b id="dom-site"></b></span>
+    </div>
+    <p class="dom-sub">Point a domain you own at your published site. Cara handles TLS automatically once your DNS verifies — no certificate setup needed.</p>
+    <div class="dom-row">
+      <input id="dom-input" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="shop.example.com"/>
+      <button type="button" id="dom-connect">Connect domain</button>
+    </div>
+    <div class="dom-badges" id="dom-badges"></div>
+    <div class="dom-dns" id="dom-dns">
+      <h4>Add these DNS records at your registrar</h4>
+      <p>Sign in to your domain registrar (GoDaddy, Namecheap, Cloudflare, Google Domains…) and add each record below to your DNS zone, then press <b>Check status</b>. Verification and the TLS certificate can take a few minutes to a few hours.</p>
+      <table class="dns"><thead><tr><th>Type</th><th>Host / Name</th><th>Value</th></tr></thead><tbody id="dom-dns-rows"></tbody></table>
+    </div>
+    <div class="dom-status" id="dom-status" role="status"></div>
   </div>
 
   <div class="team-h"><h2>The team</h2><span>LIVE = acted in your build just now · the rest run quietly in the background</span></div>
