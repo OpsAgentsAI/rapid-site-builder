@@ -676,6 +676,9 @@
       // memory entries never qualify. The server re-checks uid vs ownerUid on
       // every call anyway — this gate is purely presentational.
       p2bInit(acct);
+      // Connect-your-domain (card DYE9159z): same ownership gate as p2b —
+      // account-attested sites only; the server re-checks paid tier + ownership.
+      domInit(acct);
       $('mysites').style.display = 'block';
       $('mysites-label').textContent = 'on your account';
       $('mysites-acct').innerHTML = `<span>${esc(cfg.me.email || 'signed in')}</span><button id="acct-out" style="${ACCT_BTN}">Sign out</button>`;
@@ -801,6 +804,123 @@
     // our own listener, so selectSite() stays untouched (convoy-safe).
     const sw = $('site-switch');
     if (sw) sw.addEventListener('change', p2bPaint);
+  }
+
+  // ===== Connect-your-domain (card DYE9159z) =====
+  // Paid-tier owners point an owned domain at a published site via the Firebase
+  // Hosting customDomains API. All calls ride the Hosting rewrite (RELATIVE
+  // url + same-origin credentials) so the first-party __session cookie travels,
+  // exactly like p2bSend. The server verifies session → paid tier → ownership
+  // on every call; this panel only shows for account-listed (owned) sites.
+  // Auto-TLS is Firebase's — we render cert STATE, never provision it here.
+  let domOwned = [];   // account-listed sites — the only valid targets
+
+  function domTarget() {
+    if (!domOwned.length) return null;
+    return domOwned.find(s => s.id === selectedId) || domOwned[0];
+  }
+
+  const DOM_STATUS_TEXT = {
+    live: '✅ Live and secure — your domain is serving your site over HTTPS.',
+    securing: '🔒 Domain verified — Cara is provisioning the TLS certificate. This usually finishes within an hour.',
+    pending: '⏳ Waiting on DNS — add the records below at your registrar, then check the status.',
+    conflict: '⚠️ Conflict — a required DNS record clashes with an existing one, or the domain is claimed elsewhere. Review the records below.'
+  };
+
+  function domBadges(d) {
+    const cls = d.status || 'pending';
+    const badge = (k, v, extra) => `<span class="dom-badge${extra ? ' ' + extra : ''}"><span class="k">${esc(k)}</span> ${esc(v)}</span>`;
+    return [
+      badge('domain', d.host || '', cls),
+      badge('ownership', prettyState(d.ownershipState)),
+      badge('host', prettyState(d.hostState)),
+      badge('TLS', prettyState(d.certState))
+    ].join('');
+  }
+  function prettyState(s) {
+    if (!s || s === 'UNKNOWN') return '—';
+    // OWNERSHIP_ACTIVE → Active, CERT_PROPAGATING → Propagating, HOST_UNHOSTED → Unhosted
+    const tail = String(s).split('_').slice(1).join(' ').toLowerCase();
+    return tail ? tail.charAt(0).toUpperCase() + tail.slice(1) : s;
+  }
+
+  function paintDomain(d) {
+    const badges = $('dom-badges'), dns = $('dom-dns'), rows = $('dom-dns-rows'), status = $('dom-status');
+    if (!d) { badges.innerHTML = ''; dns.style.display = 'none'; status.style.display = 'none'; return; }
+    badges.innerHTML = domBadges(d);
+    status.style.display = 'block';
+    status.textContent = DOM_STATUS_TEXT[d.status] || DOM_STATUS_TEXT.pending;
+    const add = (d.dns && d.dns.add) || [];
+    if (add.length && d.status !== 'live') {
+      rows.innerHTML = add.map(r =>
+        `<tr><td>${esc(r.type)}</td><td>${esc(r.domainName || '@')}</td><td>${esc(r.value)}<span class="cp" data-cp="${esc(r.value)}">copy</span></td></tr>`
+      ).join('');
+      dns.style.display = 'block';
+    } else {
+      dns.style.display = 'none';
+    }
+  }
+
+  async function domRefresh(target) {
+    const t = target || domTarget();
+    if (!t) return;
+    $('dom-site').textContent = t.business || t.id;
+    try {
+      const r = await fetch('/api/domains/status?siteId=' + encodeURIComponent(t.id), { credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) paintDomain(j.domain || null);
+    } catch { /* offline — leave the last paint */ }
+  }
+
+  async function domConnect() {
+    const t = domTarget();
+    if (!t) return;
+    const host = String($('dom-input').value || '').trim();
+    if (!host) return;
+    const btn = $('dom-connect'), status = $('dom-status');
+    btn.disabled = true;
+    status.style.display = 'block';
+    status.textContent = 'Handing your domain to Cara…';
+    try {
+      const r = await fetch('/api/domains/connect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ siteId: t.id, domain: host })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Couldn’t connect that domain right now.');
+      paintDomain(j.domain || null);
+    } catch (e) {
+      status.textContent = String(e.message || 'Something went wrong — try again in a moment.').slice(0, 200);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function domInit(acct) {
+    const panel = $('dom');
+    if (!panel) return;
+    domOwned = (acct || []).filter(s => s && s.id);
+    if (!domOwned.length) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    const t = domTarget();
+    if (t) $('dom-site').textContent = t.business || t.id;
+    domRefresh(t);
+    if (panel.dataset.bound) return;
+    panel.dataset.bound = '1';
+    $('dom-connect').addEventListener('click', domConnect);
+    $('dom-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') domConnect(); });
+    // copy-to-clipboard for DNS record values (delegated — rows re-render)
+    $('dom-dns-rows').addEventListener('click', (e) => {
+      const cp = e.target && e.target.closest && e.target.closest('.cp');
+      if (!cp) return;
+      const val = cp.getAttribute('data-cp') || '';
+      (navigator.clipboard ? navigator.clipboard.writeText(val) : Promise.reject())
+        .then(() => { cp.textContent = 'copied'; setTimeout(() => { cp.textContent = 'copy'; }, 1500); })
+        .catch(() => { cp.textContent = 'select & copy'; });
+    });
+    // Follow the site switcher so the panel always targets the selected site.
+    const sw = $('site-switch');
+    if (sw) sw.addEventListener('change', () => domRefresh());
   }
 
   $('ask-go').addEventListener('click', ask);
