@@ -1,0 +1,37 @@
+name: CI (real-app)
+
+# Produces the branch-protection status-check context required by the `real-app`
+# branch: a check named exactly `test`. GitHub Actions reports the status context
+# as the JOB name, so the job below is `test` (no custom `name:`) — its check
+# surfaces as `test` and satisfies the required-context rule.
+#
+# Why this exists (card i6cSEjo2 / #77): the `real-app` branch requires a `test`
+# status check, but preview.yml only fires on PRs → main, so nothing ever produced
+# a `test` context for PRs → real-app. Every real-app PR therefore sat
+# mergeStateStatus=BLOCKED forever and needed an admin-bypass merge (e.g. PR #47,
+# after the suite was run locally, 57/57 pass). This workflow runs the suite in CI
+# on every PR → real-app and reports the missing context, unblocking normal merges.
+#
+# Public repo (Apache-2.0): no secrets, no engine/agent IDs, no internal URLs —
+# a plain `node --test` run. Default read-only permissions are sufficient.
+
+on:
+  pull_request:
+    branches: [real-app]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - run: npm test
