@@ -86,9 +86,19 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .go:hover{transform:translateY(-2px);box-shadow:0 14px 30px var(--brand-orange-ring)}
 .go:disabled{opacity:.55;cursor:wait;transform:none;box-shadow:none}
 .free{color:var(--ink-3);font-size:13px;text-align:center;margin-top:12px}
+/* bring-my-own-website import row */
+.importrow{margin-bottom:14px}
+.importline{display:flex;gap:10px}
+.importline input{flex:1;min-width:0}
+.importbtn{border:1px solid var(--border-strong);background:var(--surface);color:var(--ink-2);border-radius:var(--radius-md);font:600 13.5px var(--font-body);padding:0 16px;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
+.importbtn:hover{border-color:var(--brand-orange);color:var(--brand-orange)}
+.importbtn:disabled{opacity:.55;cursor:wait}
+.importmsg{font-size:12.5px;color:var(--ink-3);margin-top:8px;min-height:16px;text-align:start}
+.importmsg.ok{color:var(--status-healthy,#00C875)}
+.importmsg.bad{color:#B3261E}
 /* media drop-zone */
 .mediarow{margin-bottom:14px}
-.mediarow .opt{text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink-3)}
+.mediarow .opt,.importrow .opt{text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink-3)}
 .dropzone{border:1.5px dashed var(--border-strong);border-radius:var(--radius-md);background:var(--surface-sunken);padding:18px 16px;text-align:center;font-size:13.5px;color:var(--ink-3);cursor:pointer;transition:border-color .15s,background-color .15s}
 .dropzone:hover,.dropzone.drag{border-color:var(--brand-orange);background:var(--brand-orange-soft);color:var(--ink-2)}
 .dropzone .linklike{border:0;background:none;color:var(--brand-orange);font:600 13.5px var(--font-body);cursor:pointer;padding:0;text-decoration:underline}
@@ -232,6 +242,14 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         <button class="chip" type="button" data-cat="fitness" data-i18n="chip.2">Boutique pilates studio for busy parents</button>
         <button class="chip" type="button" data-cat="real_estate" data-i18n="chip.3">Family real-estate agency, 20 years in the Sharon</button>
         <button class="chip" type="button" data-cat="food_beverage" data-i18n="chip.4">Cozy neighborhood bakery with a wood-fired oven</button>
+      </div>
+      <div class="importrow">
+        <label for="siteurl"><span data-i18n="import.label">Already have a website?</span> <span class="opt" data-i18n="import.opt">(paste it — the team starts from your real business)</span></label>
+        <div class="importline">
+          <input id="siteurl" maxlength="2048" inputmode="url" autocomplete="url" placeholder="https://your-current-site.com" data-i18n-ph="import.ph"/>
+          <button type="button" class="importbtn" id="importbtn" data-i18n="import.btn">Start from my site</button>
+        </div>
+        <div class="importmsg" id="importmsg" role="status" aria-live="polite"></div>
       </div>
       <div class="frow">
         <div><label for="business" data-i18n="label.business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna" data-i18n-ph="ph.business"/></div>
@@ -526,6 +544,38 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     if (n >= 3) agentsRan.has('phoenix') && setPill('phoenix', 'd');
   }
 
+  // Bring my own website (card OWIBIIsu): the server reads the pasted site and
+  // answers with brief suggestions; we pre-fill the form and the human still
+  // reviews + clicks Build. Errors land inline, never as a dead end.
+  async function importOwnSite() {
+    const url = $('siteurl').value.trim();
+    const msg = $('importmsg');
+    if (!url) { $('siteurl').focus(); return; }
+    $('importbtn').disabled = true;
+    msg.className = 'importmsg';
+    msg.textContent = T('import.busy');
+    try {
+      const r = await fetch(API + '/api/import-site', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || T('import.fail'));
+      const b = j.brief || {};
+      if (b.business) $('business').value = b.business;
+      if (b.description) $('description').value = b.description;
+      if (b.category && $('category').querySelector('option[value="' + b.category + '"]')) $('category').value = b.category;
+      msg.className = 'importmsg ok';
+      msg.textContent = T('import.done', { host: j.sourceHost || url });
+      if (window.rsbTrack) rsbTrack('site_import_used', {});
+      if (window.rsbPH) rsbPH('site_import_used', { source_host: j.sourceHost || '' });
+    } catch (e) {
+      msg.className = 'importmsg bad';
+      msg.textContent = String((e && e.message) || T('import.fail'));
+    } finally {
+      $('importbtn').disabled = false;
+    }
+  }
+
   async function build() {
     const brief = {
       business: $('business').value.trim(),
@@ -715,6 +765,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 
   $('langbtn').addEventListener('click', () => RSB_I18N.setLang(RSB_I18N.lang === 'he' ? 'en' : 'he'));
   $('go').addEventListener('click', build);
+  $('importbtn').addEventListener('click', importOwnSite);
+  $('siteurl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importOwnSite(); } });
   $('publish').addEventListener('click', publish);
   $('again').addEventListener('click', () => location.reload());
   $('copy').addEventListener('click', () => navigator.clipboard.writeText($('live-a').href));

@@ -32,7 +32,7 @@ test('retirement mode: 410 engine APIs, 301 pages, health + /sites keep serving'
     });
 
     // step 1 — anonymous engine endpoints are gone
-    for (const p of ['/api/build', '/api/publish', '/api/ask']) {
+    for (const p of ['/api/build', '/api/publish', '/api/ask', '/api/import-site']) {
       const res = await post(p);
       assert.strictEqual(res.status, 410, `${p} must be 410 Gone`);
       const body = await res.json();
