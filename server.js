@@ -24,6 +24,7 @@ const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
+const importSite = require('./lib/importSite');
 const posthog = require('./lib/posthog');
 const { PUBLIC_MEDIA_BASE_URL: MEDIA_BASE } = require('./lib/publicMedia');
 
@@ -87,7 +88,7 @@ app.use('/rp', async (req, res) => {
 const RETIRE_UNGATED = process.env.RETIRE_UNGATED === '1';
 const CANONICAL_APP_URL = (process.env.CANONICAL_APP_URL || 'https://builder.opsagents.agency').replace(/\/$/, '');
 if (RETIRE_UNGATED) {
-  const GONE_API = new Set(['/api/build', '/api/publish', '/api/ask']);
+  const GONE_API = new Set(['/api/build', '/api/publish', '/api/ask', '/api/import-site']);
   app.use((req, res, next) => {
     if (req.method === 'OPTIONS') return next(); // CORS preflight → the /api handler
     const p = req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path;
@@ -157,6 +158,8 @@ function limiter(max) {
 }
 const rateOk = limiter(RATE_MAX);         // builds are the expensive op
 const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
+const IMPORT_RATE_MAX = Number(process.env.IMPORTS_PER_HOUR_PER_IP) || 20;
+const importRateOk = limiter(IMPORT_RATE_MAX); // outbound homepage fetches (bring-my-own-website)
 
 // For English builds, drop Hebrew lines from streamed agent text — the deployed
 // crew's copy agent drafts bilingually by instruction; the English-only surface
@@ -280,6 +283,25 @@ function cleanBrief(body) {
   if (!brief.business && !brief.description) return null;
   return brief;
 }
+
+// ---- bring my own website (card OWIBIIsu) ----------------------------------------
+// The visitor pastes the address of the site they already have; we fetch it
+// server-side (SSRF-screened in lib/importSite.js) and answer with a pre-filled
+// brief. The human reviews the form and clicks Build — nothing here reaches the
+// crew or the renderer directly, and no site is built or published by this call.
+app.post('/api/import-site', async (req, res) => {
+  if (!importRateOk(req)) return res.status(429).json({ error: 'Rate limit reached — try again in a bit.' });
+  const rawUrl = String((req.body || {}).url || '').slice(0, 2048);
+  if (!rawUrl.trim()) return res.status(400).json({ error: 'Paste your website address first.' });
+  const result = await importSite.importFromUrl(rawUrl);
+  if (!result.ok) return res.status(result.status || 422).json({ error: result.error });
+  const { business, description, lang, textSample } = result.brief;
+  const category = inferCategory([business, description, textSample].join(' '));
+  posthog.capture('import_' + Date.now().toString(36), 'site_import_suggested', {
+    source_host: result.sourceHost, lang, category
+  });
+  res.json({ ok: true, sourceHost: result.sourceHost, brief: { business, description, lang, category } });
+});
 
 // ---- SSE build -----------------------------------------------------------------
 app.post('/api/build', async (req, res) => {
