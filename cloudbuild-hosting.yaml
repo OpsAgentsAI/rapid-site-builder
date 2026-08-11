@@ -20,8 +20,13 @@ steps:
       - |
         set -e
         echo "== Firebase hosting deploy (native metadata ADC — no WIF/STS hop) =="
+        # SCOPED to the two hackathon sites only. firebase.json also carries the
+        # real-app site (rapid-site-builder-app, deployed by deploy-realapp.yml /
+        # cloudbuild-realapp-hosting.yaml with ITS OWN __API_BASE__ bake) — an
+        # unscoped `--only hosting` here would overwrite the real app's UI with
+        # assets baked to the retired proxy URL.
         npx -y firebase-tools@15.21.0 deploy \
-          --only hosting \
+          --only hosting:rapid-site-builder,hosting:rapid-site-builder-he \
           --project opsagent-staging --non-interactive
 # CLOUD_LOGGING_ONLY is required when a build runs as a user-managed --service-account.
 options:
