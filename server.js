@@ -74,6 +74,37 @@ app.use('/rp', async (req, res) => {
   }
 });
 
+// ---- retirement mode (card KjHpbn3J, steps 1–2 — REVERSIBLE) ---------------------
+// The hackathon demo surface is retired: RETIRE_UNGATED=1 (set only on the ungated
+// rapid-builder-proxy deploy, never on the real app) flips this surface to
+//   • 410 Gone on the anonymous engine endpoints (/api/build, /api/publish,
+//     /api/ask) — stops anonymous Vertex/engine burn immediately, and
+//   • 301 on the pages (/ , /board , /campfire) → the canonical product surface.
+// Everything else keeps serving: published demo sites /sites/** (step 3 — public
+// links must not break), /api/health + /healthz (monitoring), /rp analytics,
+// static assets, /admin. Revert = remove RETIRE_UNGATED from deploy.yml and
+// redeploy (or unset the env var on the service) — no data or routes are deleted.
+const RETIRE_UNGATED = process.env.RETIRE_UNGATED === '1';
+const CANONICAL_APP_URL = (process.env.CANONICAL_APP_URL || 'https://builder.opsagents.agency').replace(/\/$/, '');
+if (RETIRE_UNGATED) {
+  const GONE_API = new Set(['/api/build', '/api/publish', '/api/ask']);
+  app.use((req, res, next) => {
+    if (req.method === 'OPTIONS') return next(); // CORS preflight → the /api handler
+    const p = req.path.length > 1 ? req.path.replace(/\/+$/, '') : req.path;
+    if (GONE_API.has(p)) {
+      return res.status(410).json({
+        error: 'This hackathon demo surface is retired. The product now lives at ' + CANONICAL_APP_URL + '.',
+        canonical: CANONICAL_APP_URL
+      });
+    }
+    if (p === '/' || p === '/index.html') return res.redirect(301, CANONICAL_APP_URL + '/');
+    if (p === '/board' || p.startsWith('/board/') || p === '/campfire' || p.startsWith('/campfire/')) {
+      return res.redirect(301, CANONICAL_APP_URL + p);
+    }
+    return next();
+  });
+}
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'web'), { index: false }));
 

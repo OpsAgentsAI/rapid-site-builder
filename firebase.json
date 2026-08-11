@@ -4,6 +4,14 @@
       "site": "rapid-site-builder",
       "public": "web",
       "ignore": ["**/.*"],
+      "redirects": [
+        { "source": "/", "destination": "https://builder.opsagents.agency/", "type": 301 },
+        { "source": "/index.html", "destination": "https://builder.opsagents.agency/", "type": 301 },
+        { "source": "/board", "destination": "https://builder.opsagents.agency/board", "type": 301 },
+        { "source": "/board/**", "destination": "https://builder.opsagents.agency/board", "type": 301 },
+        { "source": "/campfire", "destination": "https://builder.opsagents.agency/campfire", "type": 301 },
+        { "source": "/campfire/**", "destination": "https://builder.opsagents.agency/campfire", "type": 301 }
+      ],
       "rewrites": [
         {
           "source": "**",
@@ -15,6 +23,14 @@
       "site": "rapid-site-builder-he",
       "public": "web",
       "ignore": ["**/.*"],
+      "redirects": [
+        { "source": "/", "destination": "https://builder.opsagents.agency/", "type": 301 },
+        { "source": "/index.html", "destination": "https://builder.opsagents.agency/", "type": 301 },
+        { "source": "/board", "destination": "https://builder.opsagents.agency/board", "type": 301 },
+        { "source": "/board/**", "destination": "https://builder.opsagents.agency/board", "type": 301 },
+        { "source": "/campfire", "destination": "https://builder.opsagents.agency/campfire", "type": 301 },
+        { "source": "/campfire/**", "destination": "https://builder.opsagents.agency/campfire", "type": 301 }
+      ],
       "rewrites": [
         {
           "source": "**",
