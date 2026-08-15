@@ -19,10 +19,12 @@ const path = require('path');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
-const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner } = require('./lib/store');
+const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner, loadSiteMeta, saveSiteDomain } = require('./lib/store');
+const domains = require('./lib/domains');
 const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
+const p2b = require('./lib/p2b-media');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -58,31 +60,38 @@ app.use('/api', (req, res, next) => {
 // /sites/* fine — those are quick GETs, not streams).
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-// ---- simple per-IP rate limits ---------------------------------------------------
+// ---- simple per-IP / per-uid rate limits -----------------------------------------
 const RATE_MAX = Number(process.env.BUILDS_PER_HOUR_PER_IP) || 12;
 const UPLOAD_RATE_MAX = Number(process.env.UPLOADS_PER_HOUR_PER_IP) || 30;
-function limiter(max) {
-  const hits = new Map(); // ip -> [timestamps]
+const PUBLISH_RATE_MAX = Number(process.env.PUBLISHES_PER_DAY_PER_UID) || 10;
+function limiter(max, windowMs = 3600_000) {
+  const hits = new Map(); // key -> [timestamps]
   // req.ip honors trust-proxy(1): the GFE-appended XFF entry, not the
   // spoofable leftmost hop. Never parse X-Forwarded-For by hand here.
-  const key = (req) => String(req.ip || '').trim() || 'unknown';
-  const live = (ip, now) => (hits.get(ip) || []).filter(t => now - t < 3600_000);
-  const take = (req) => {
-    const ip = key(req);
+  // A plain string keys the bucket directly (per-uid budgets, card ns341yIF).
+  const key = (r) => typeof r === 'string' ? r : String((r && r.ip) || '').trim() || 'unknown';
+  const live = (k, now) => (hits.get(k) || []).filter(t => now - t < windowMs);
+  const take = (r) => {
+    const k = key(r);
     const now = Date.now();
-    const arr = live(ip, now);
+    const arr = live(k, now);
     if (arr.length >= max) return false;
     arr.push(now);
-    hits.set(ip, arr);
+    hits.set(k, arr);
     if (hits.size > 5000) hits.clear(); // crude memory guard
     return true;
   };
   // Non-consuming check: lets one budget gate another route without burning a slot.
-  take.peek = (req) => live(key(req), Date.now()).length < max;
+  take.peek = (r) => live(key(r), Date.now()).length < max;
   return take;
 }
 const rateOk = limiter(RATE_MAX);         // builds are the expensive op
 const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
+// Publishing writes durable objects to the public sites bucket — cap it per
+// rolling day. Keyed per-uid on the auth-ON surface (the signed-in account is
+// the stable identity there); falls back to per-IP when auth is off (local
+// dev, judge clone), so the cap holds on every deployment shape (ns341yIF).
+const publishRateOk = limiter(PUBLISH_RATE_MAX, 86_400_000);
 
 // For English builds, drop Hebrew lines from streamed agent text — the deployed
 // crew's copy agent drafts bilingually by instruction; the English-only surface
@@ -361,6 +370,98 @@ app.post('/api/uploads/sign', async (req, res) => {
   }
 });
 
+// P2b (card RzaCDxAa): a signed-in owner sends new photos to one of THEIR
+// sites. Ownership is verified server-side (session uid vs the site meta's
+// ownerUid) and a re-render request lands on the site meta; the engine is
+// NEVER called from this path — see lib/p2b-media.js.
+app.post('/api/site-media', p2b.siteMediaRoute({ auth, rateOk, uploadRateOk }));
+
+// ---- connect-your-domain (card DYE9159z) ----------------------------------------
+// A paid-tier owner attaches an owned domain to one of THEIR published sites via
+// the Firebase Hosting customDomains REST API, then polls attach/DNS/TLS state.
+// Auto-TLS is Firebase's — we only surface cert state and translate the required
+// DNS records for the guided copy-paste flow (see lib/domains.js + the runbook).
+//
+// Gate order is deliberate and fail-closed:
+//   1. auth configured + valid session (never anonymous — a domain needs an owner)
+//   2. paid tier (custom domains are a paid capability)
+//   3. ownership: the session uid must equal the site meta's ownerUid
+// so an unauthenticated or non-owning probe can never touch another user's domain.
+async function resolveDomainOwner(req, res, siteId) {
+  if (!domains.ENABLED) {
+    res.status(503).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Custom domains are not configured on this deployment.' });
+    return null;
+  }
+  if (!auth.AUTH_ENABLED) {
+    res.status(503).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Sign-in must be configured to connect a domain.' });
+    return null;
+  }
+  const session = auth.sessionFromReq(req);
+  if (!session || !session.uid) {
+    res.status(401).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Sign in to connect a domain.', signin: true });
+    return null;
+  }
+  if (!domains.isPaid(session.uid)) {
+    res.status(403).set('Cache-Control', 'private, no-store')
+      .json({ error: 'Connecting a custom domain is a paid-plan feature.', upgrade: true });
+    return null;
+  }
+  if (!/^[a-f0-9]{8}$/.test(String(siteId))) {
+    res.status(400).set('Cache-Control', 'private, no-store').json({ error: 'Bad site id.' });
+    return null;
+  }
+  const meta = await loadSiteMeta(siteId);
+  if (!meta || meta.ownerUid !== session.uid) {
+    // Same 404 for "no such site" and "not yours" — never reveal another
+    // owner's site exists (mirrors p2b-media ownership handling).
+    res.status(404).set('Cache-Control', 'private, no-store').json({ error: 'Site not found.' });
+    return null;
+  }
+  return { session, meta };
+}
+
+app.post('/api/domains/connect', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  const siteId = String((req.body && req.body.siteId) || '');
+  const ctx = await resolveDomainOwner(req, res, siteId);
+  if (!ctx) return;
+  const host = domains.normalizeHost((req.body && req.body.domain) || '');
+  if (!host) return res.status(400).json({ error: 'Enter a valid domain you own, e.g. shop.example.com.' });
+  try {
+    const summary = await domains.attachCustomDomain(host);
+    // Persist the attach state on the site meta so /board can paint it without
+    // re-hitting Hosting; best-effort — the live summary is what we return.
+    await saveSiteDomain(siteId, summary).catch(() => { /* meta stamp is best-effort */ });
+    res.json({ ok: true, domain: summary });
+  } catch (e) {
+    res.status((e && e.status) || 502).json({ error: String((e && e.message) || e).slice(0, 300) });
+  }
+});
+
+app.get('/api/domains/status', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  const siteId = String(req.query.siteId || '');
+  const ctx = await resolveDomainOwner(req, res, siteId);
+  if (!ctx) return;
+  // Which domain to poll: the explicit query wins, else the one on record.
+  const onRecord = ctx.meta.domain && ctx.meta.domain.host;
+  const host = domains.normalizeHost(req.query.domain || onRecord || '');
+  if (!host) return res.json({ ok: true, domain: null }); // nothing connected yet
+  try {
+    const summary = await domains.getCustomDomain(host);
+    await saveSiteDomain(siteId, summary).catch(() => { /* best-effort refresh */ });
+    res.json({ ok: true, domain: summary });
+  } catch (e) {
+    // A not-yet-created domain reads as 404 from Hosting — report "none" rather
+    // than an error so the board shows the connect form, not a failure.
+    if (e && e.status === 404) return res.json({ ok: true, domain: null });
+    res.status((e && e.status) || 502).json({ error: String((e && e.message) || e).slice(0, 300) });
+  }
+});
+
 // ---- publish --------------------------------------------------------------------
 app.post('/api/publish', async (req, res) => {
   try {
@@ -371,6 +472,11 @@ app.post('/api/publish', async (req, res) => {
     if (auth.AUTH_ENABLED && (!session || !session.uid)) {
       return res.status(401).set('Cache-Control', 'private, no-store')
         .json({ error: 'Sign in to publish your site.', signin: true });
+    }
+    // Abuse cap (ns341yIF): checked after the auth gate so an unauthenticated
+    // probe can never burn a signed-in user's bucket slot.
+    if (!publishRateOk(session && session.uid ? `uid:${session.uid}` : req)) {
+      return res.status(429).json({ error: 'Publish limit reached for today — try again tomorrow.' });
     }
     const spec = req.body && req.body.spec;
     if (!spec || !spec.business) return res.status(400).json({ error: 'Missing site spec to publish.' });
@@ -403,6 +509,9 @@ app.post('/api/publish', async (req, res) => {
     // LLM-EO: publish llms.txt next to the HTML so AI assistants can read the
     // business at a glance (llmstxt.org). Non-fatal — the site is the product.
     try { await saveLlms(id, llmsTxt(spec, `${base}/sites/${id}`)); } catch { /* best-effort */ }
+    // P2b (card RzaCDxAa): keep the spec on file next to the HTML so "send the
+    // team new photos" can re-render this site later WITHOUT an engine run.
+    try { await p2b.saveSpec(id, spec); } catch { /* best-effort */ }
     res.json({ id, url: `${base}/sites/${id}` });
   } catch (e) {
     res.status(500).json({ error: String((e && e.message) || e).slice(0, 300) });
@@ -485,6 +594,7 @@ app.get('/api/health', (_req, res) => res.json({
   sitesBucket: !!process.env.PUBLISHED_SITES_BUCKET,
   auth: auth.AUTH_ENABLED,
   uploadsBucket: uploads.ENABLED,
+  customDomains: domains.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));

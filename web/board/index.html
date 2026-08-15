@@ -3,6 +3,21 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!-- Google Analytics 4 (GA4) — RSB Builder property 549064186, stream builder.opsagents.agency. Raw canonical gtag.js (house rule: never firebase-analytics SDK). Measurement ID is public client config. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-8ZV9B6NH11"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){ dataLayer.push(arguments); }
+  gtag('js', new Date());
+  gtag('config', 'G-8ZV9B6NH11');
+  // Web error-tracking baseline (Crashlytics is native-only) — exception events, no PII.
+  window.addEventListener('error', function(e){
+    gtag('event', 'exception', { description: (e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||0)).slice(0,150), fatal: false });
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    gtag('event', 'exception', { description: ('unhandledrejection: ' + String(e && e.reason)).slice(0,150), fatal: false });
+  });
+</script>
 <title>Your AI ops team</title>
 <meta name="description" content="The AI agent team that built — and now operates — your website. You never have to worry about it; talk to the team only when you wish."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -31,6 +46,9 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;min-height:100vh}
 .wrap{max-width:1180px;margin-inline:auto;padding:24px 22px 64px}
+/* wide-desktop fill (card VkeRMe4c): the 1180px cap left ~370px dead gutters per side
+   at 1920px; widening the wrap lets the auto-fill team grid add columns */
+@media(min-width:1440px){.wrap{max-width:clamp(1180px,92vw,1760px)}}
 .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:19px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
 .wordmark .br{color:var(--brand-orange);font-weight:700}
@@ -203,6 +221,65 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 @media(prefers-reduced-motion:reduce){
   .drill-back,.drill-sheet{animation:none}
 }
+
+/* ===== P2b — send the team new photos (card RzaCDxAa) ===== */
+#p2b{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:24px}
+#p2b .p2b-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px}
+#p2b .p2b-head b{font:700 14px var(--font-display)}
+#p2b .p2b-head .tgt{font-size:12px;color:var(--ink-3)}
+#p2b .p2b-head .tgt b{font-size:12px;color:var(--ink-2)}
+#p2b .p2b-sub{font-size:13px;color:var(--ink-3);margin:0 0 12px;line-height:1.5}
+#p2b .p2b-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#p2b .p2b-row .hint{font-size:12px;color:var(--ink-3)}
+#p2b button{min-height:36px;padding:0 15px;border-radius:var(--radius-sm);font:600 13px var(--font-body);cursor:pointer}
+#p2b button:disabled{opacity:.55;cursor:not-allowed}
+#p2b .pick{color:var(--ink-2);background:var(--surface-sunken);border:1px solid var(--border)}
+#p2b .send{color:#fff;background:var(--brand-gradient);border:0;font-weight:700}
+#p2b .p2b-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+#p2b .p2b-chips:empty{display:none}
+.p2b-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-pill);padding:5px 12px;font-size:12px;color:var(--ink-2)}
+.p2b-chip.ok{border-color:color-mix(in srgb,var(--status-healthy) 45%,transparent);background:var(--status-healthy-soft)}
+.p2b-chip.bad{border-color:color-mix(in srgb,var(--status-stuck) 45%,transparent);background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
+#p2b .p2b-status{display:none;margin-top:11px;font-size:13px;color:var(--ink-2);line-height:1.55;background:var(--surface-sunken);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:10px 14px}
+
+/* ===== connect-your-domain panel (card DYE9159z) ===== */
+#dom{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;margin-bottom:24px}
+#dom .dom-head{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px}
+#dom .dom-head b{font:700 14px var(--font-display)}
+#dom .dom-head .tgt{font-size:12px;color:var(--ink-3)}
+#dom .dom-head .tgt b{font-size:12px;color:var(--ink-2)}
+#dom .dom-sub{font-size:13px;color:var(--ink-3);margin:0 0 12px;line-height:1.5}
+#dom .dom-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#dom input[type=text]{flex:1;min-width:200px;min-height:36px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font:500 14px var(--font-mono);color:var(--ink-1);background:var(--surface-sunken)}
+#dom button{min-height:36px;padding:0 15px;border-radius:var(--radius-sm);font:600 13px var(--font-body);cursor:pointer;color:#fff;background:var(--brand-gradient);border:0;font-weight:700}
+#dom button:disabled{opacity:.55;cursor:not-allowed}
+#dom .dom-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.dom-badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:var(--radius-pill);padding:5px 12px;font-size:12px;color:var(--ink-2);background:var(--surface-sunken)}
+.dom-badge .k{color:var(--ink-3);font-weight:600}
+.dom-badge.live{border-color:color-mix(in srgb,var(--status-healthy) 45%,transparent);background:var(--status-healthy-soft)}
+.dom-badge.securing{border-color:color-mix(in srgb,var(--brand-orange) 45%,transparent)}
+.dom-badge.conflict{border-color:color-mix(in srgb,var(--status-stuck) 45%,transparent);background:var(--status-stuck-soft);color:var(--status-stuck-ink)}
+#dom .dom-dns{display:none;margin-top:13px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px}
+#dom .dom-dns h4{margin:0 0 8px;font:700 13px var(--font-display);color:var(--ink-1)}
+#dom .dom-dns p{margin:0 0 10px;font-size:12.5px;color:var(--ink-3);line-height:1.5}
+#dom table.dns{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px}
+#dom table.dns th{text-align:start;color:var(--ink-3);font-weight:600;padding:4px 8px;border-bottom:1px solid var(--border)}
+#dom table.dns td{padding:5px 8px;border-bottom:1px solid var(--border);color:var(--ink-2);vertical-align:top;word-break:break-all}
+#dom table.dns td .cp{cursor:pointer;color:var(--brand-orange);font-family:var(--font-body);font-size:11px;font-weight:700;margin-inline-start:6px;user-select:none}
+#dom .dom-status{display:none;margin-top:11px;font-size:13px;color:var(--ink-2);line-height:1.55;background:var(--surface-sunken);border-inline-start:4px solid var(--brand-orange);border-radius:var(--radius-md);padding:10px 14px}
+
+/* ===== mobile polish (card kP9hZRul) ===== */
+@media(max-width:640px){
+  .wrap{padding:18px 16px 56px}
+  .theo{padding:22px 18px;gap:20px}
+  .langbtn{min-height:44px}
+  /* 16px inputs: anything smaller makes iOS Safari auto-zoom on focus */
+  .ask input,.filter-search input{font-size:16px}
+  .ask button,.gate button,.chip{min-height:44px}
+  .filter-search{max-width:none}
+  .card .drag{padding:17px 16px;opacity:.7}
+  .back{display:inline-flex;padding:10px 4px;margin:-6px -4px}
+}
 </style>
 </head>
 <body>
@@ -258,6 +335,46 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
       <span id="mysites-acct" style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-3)"></span>
     </div>
     <div id="mysites-list" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+  </div>
+
+  <!-- P2b (card RzaCDxAa): send the team new photos — shown only for a
+       signed-in account with owned sites; the server re-verifies ownership
+       (session uid vs the site's ownerUid) on every call. Auth-off deploys
+       never reveal this panel. -->
+  <div id="p2b">
+    <div class="p2b-head">
+      <b>📸 Send the team new photos</b>
+      <span class="tgt">updating <b id="p2b-site"></b></span>
+    </div>
+    <p class="p2b-sub">Theo hands your new photos to Leo (layout) and the team refreshes your live site around them — you don't have to do anything else.</p>
+    <input id="p2b-files" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden/>
+    <div class="p2b-row">
+      <button type="button" class="pick" id="p2b-pick">Choose photos…</button>
+      <button type="button" class="send" id="p2b-send" disabled>Send to the team</button>
+      <span class="hint">up to 8 · photos ≤15MB · video ≤100MB</span>
+    </div>
+    <div class="p2b-chips" id="p2b-chips"></div>
+    <div class="p2b-status" id="p2b-status" role="status"></div>
+  </div>
+
+  <!-- Connect-your-domain (card DYE9159z) — paid-tier, owned sites only -->
+  <div id="dom">
+    <div class="dom-head">
+      <b>🌐 Connect your own domain</b>
+      <span class="tgt">for <b id="dom-site"></b></span>
+    </div>
+    <p class="dom-sub">Point a domain you own at your published site. Cara handles TLS automatically once your DNS verifies — no certificate setup needed.</p>
+    <div class="dom-row">
+      <input id="dom-input" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="shop.example.com"/>
+      <button type="button" id="dom-connect">Connect domain</button>
+    </div>
+    <div class="dom-badges" id="dom-badges"></div>
+    <div class="dom-dns" id="dom-dns">
+      <h4>Add these DNS records at your registrar</h4>
+      <p>Sign in to your domain registrar (GoDaddy, Namecheap, Cloudflare, Google Domains…) and add each record below to your DNS zone, then press <b>Check status</b>. Verification and the TLS certificate can take a few minutes to a few hours.</p>
+      <table class="dns"><thead><tr><th>Type</th><th>Host / Name</th><th>Value</th></tr></thead><tbody id="dom-dns-rows"></tbody></table>
+    </div>
+    <div class="dom-status" id="dom-status" role="status"></div>
   </div>
 
   <div class="team-h"><h2>The team</h2><span>LIVE = acted in your build just now · the rest run quietly in the background</span></div>
