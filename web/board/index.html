@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="/opsagents-mark.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/opsagents-mark.svg"/>
 <title>Your AI ops team</title>
 <meta name="description" content="The AI agent team that built — and now operates — your website. You never have to worry about it; talk to the team only when you wish."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -40,6 +42,8 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:19px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
 .wordmark .br{color:var(--brand-orange);font-weight:700}
+.wordmark .mark{width:24px;height:24px;flex:0 0 auto;display:block}
+[dir=rtl] .wordmark .mark{transform:none}
 .wordmark .ai{font-size:10.5px;font-weight:700;color:#fff;background:var(--brand-gradient);padding:2px 7px;border-radius:var(--radius-pill);letter-spacing:0}
 .top .crumb{margin-inline-start:auto;color:var(--ink-3);font-size:13.5px;font-weight:600}
 .langbtn{font:700 13px var(--font-display);color:var(--ink-2);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-pill);padding:7px 16px;cursor:pointer;transition:all .15s;white-space:nowrap}
@@ -231,7 +235,7 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 <body>
 <div class="wrap" id="app">
   <div class="top">
-    <a class="wordmark" href="/"><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
+    <a class="wordmark" href="/"><img class="mark" src="/opsagents-mark.svg" alt="OpsAgents" width="24" height="24" decoding="async"/><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
     <span class="crumb" data-i18n="board.crumb">Your AI ops team</span>
     <button class="langbtn" id="langbtn" type="button" data-i18n="lang.toggle" data-i18n-aria="lang.aria">עברית</button>
   </div>

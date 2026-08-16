@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="icon" href="/opsagents-mark.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/opsagents-mark.svg"/>
 <title>Rapid Site Builder — your AI web team, live</title>
 <meta name="description" content="Describe your business in one line. A Google Cloud agent team designs, writes, and ships your website in front of you — free."/>
 <link rel="canonical" href="https://rapid-site-builder.web.app/"/>
@@ -18,7 +20,7 @@
 <meta name="twitter:title" content="Rapid Site Builder — one line in, a live website + the AI team that runs it"/>
 <meta name="twitter:description" content="Six AI agents build your site in front of you — and keep running it. Built with Gemini 3. Free to try."/>
 <meta name="twitter:image" content="https://rapid-site-builder.web.app/og.png"/>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Rapid Site Builder","applicationCategory":"DesignApplication","operatingSystem":"Web","description":"Describe your business in one line — an AI agent team designs, writes, and ships your website live, then keeps operating it.","url":"https://rapid-site-builder.web.app/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"OpsAgents","url":"https://opsagents.agency/"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Rapid Site Builder","applicationCategory":"DesignApplication","operatingSystem":"Web","description":"Describe your business in one line — an AI agent team designs, writes, and ships your website live, then keeps operating it.","url":"https://rapid-site-builder.web.app/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"OpsAgents","url":"https://opsagents.agency/","logo":{"@type":"ImageObject","url":"https://rapid-site-builder.web.app/opsagents-mark.svg"}}}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <script src="/i18n.js"></script>
@@ -57,6 +59,8 @@ header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 .head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
 .wordmark .br{color:var(--brand-orange);font-weight:700}
+.wordmark .mark{width:26px;height:26px;flex:0 0 auto;display:block}
+[dir=rtl] .wordmark .mark{transform:none}
 .wordmark .ai{font-size:11px;font-weight:700;color:#fff;background:var(--brand-gradient);padding:2px 8px;border-radius:var(--radius-pill);letter-spacing:0}
 .badges{display:flex;gap:8px;flex-wrap:wrap}
 .badge{font-size:12.5px;font-weight:600;color:var(--ink-2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;background:var(--surface)}
@@ -222,7 +226,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 </head>
 <body>
 <header class="top"><div class="wrap head">
-  <a class="wordmark" href="/"><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
+  <a class="wordmark" href="/"><img class="mark" src="/opsagents-mark.svg" alt="OpsAgents" width="26" height="26" decoding="async"/><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
   <div class="badges">
     <span class="badge"><b>Google Cloud Agent Builder</b> · ADK</span>
     <span class="badge"><b>Gemini</b> + Nano Banana Pro (Gemini 3) images</span>
