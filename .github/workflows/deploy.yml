@@ -55,6 +55,10 @@ jobs:
           echo "Service URL: $URL"
           curl -sf "$URL/api/health" | tee /tmp/health.json
           grep -q '"agentEngine":true' /tmp/health.json
+          # No auth/customDomains assertions here on purpose: this is the hackathon
+          # surface (auth OFF, no FIREBASE_API_KEY/HOSTING_SITE env wired into this
+          # Deploy Cloud Run step at all — see deploy-realapp.yml for the auth-ON,
+          # customDomains-flipping surface and its matching smoke assertions).
 
       - name: Deploy Firebase Hosting
         run: |

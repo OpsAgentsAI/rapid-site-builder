@@ -116,6 +116,17 @@ jobs:
           # the real-app surface MUST report auth enabled (fail-closed safety net:
           # a deploy that silently lost the auth env would otherwise publish ungated)
           grep -q '"auth":true' /tmp/health.json
+          # STANDING RULE: if a deploy exists to flip an env-gated boolean in
+          # /api/health, the smoke step must assert that boolean — a green deploy
+          # (revision updates, /health returns 200) says nothing about whether the
+          # feature it shipped is actually on. Card DYE9159z/#52 wired
+          # FIREBASE_HOSTING_SITE=${{ env.HOSTING_SITE }} into Cloud Run specifically
+          # to flip customDomains true; that top-level env: key renaming or vanishing
+          # would render as an empty string with no error, so this assertion is the
+          # only thing that would catch it (incident: a card sat 41h in Deploy Staging
+          # on a "deployed" claim that was true about the deploy, wrong about the
+          # feature — Trello BpHnPUfH).
+          grep -q '"customDomains":true' /tmp/health.json
 
       - name: Deploy Firebase Hosting (separate site, via Cloud Build native ADC)
         run: |
