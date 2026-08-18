@@ -99,6 +99,65 @@ serves the published *site content* only. If a future slice wants auth on the
 custom domain, an operator adds it in the Firebase console
 (Authentication → Settings → Authorized domains) by hand.
 
+## ⚠️ `PAID_TIER_UIDS` is COMMA-separated — a `|` breaks the deploy, and the error is masked
+
+`deploy-realapp.yml` builds its Cloud Run env with gcloud's **custom-delimiter**
+form, `--set-env-vars "^|^KEY=value|KEY=value|…"`. The `^|^` prefix exists
+because `ALLOWED_ORIGINS` is itself a **comma-separated list**, so the default
+comma delimiter cannot be used for the outer string.
+
+That makes the two separators mean opposite things in the same line:
+
+| Separator | Meaning |
+|---|---|
+| `\|` (pipe) | **outer** — ends one `KEY=value` pair, starts the next |
+| `,` (comma) | **inner** — separates items *within* one value |
+
+**`PAID_TIER_UIDS` is an inner list. It is COMMA-separated.**
+A `|` inside it terminates the variable early, and gcloud then reads the
+following uid as a new `KEY=value` pair — which either fabricates a bogus env var
+or rejects the whole string.
+
+**Why this is worse than a normal typo:** the value comes from a **GitHub secret**,
+so Actions masks it in the log. The parse error prints as `***` and tells you
+nothing about which variable or which character broke it. Budget an hour if you
+hit it blind.
+
+Firebase uids are `[A-Za-z0-9]{28}`, so a uid can never *contain* a pipe — the
+entire risk is an operator guessing the separator from the surrounding syntax.
+
+> **Status note (verified 2026-08-17):** `PAID_TIER_UIDS` is **not yet present in
+> `deploy-realapp.yml`** on `main` or on this branch. Today the only inner list in
+> that string is `ALLOWED_ORIGINS`. This section is written for the moment someone
+> **adds** `PAID_TIER_UIDS` to the deploy — which is the step that turns the
+> hazard on. Add it comma-separated, as an inner list, exactly like
+> `ALLOWED_ORIGINS`.
+
+Related: `docs/RUNBOOKS/cloudrun-env.md` (rule #20 — `--set-env-vars` REPLACES the
+whole set, so the canonical list in the workflow must stay complete).
+
+## Diagnostic ladder — is it the code, the config, or the gate?
+
+Proven live 2026-08-16. Read it in this order; each rung distinguishes a
+different failure, and the first two are answerable without a session cookie.
+
+| Probe | Result | Means |
+|---|---|---|
+| `GET /api/health` → `customDomains` key | **absent** | the deployed revision predates this feature — **code is not there** |
+| `GET /api/health` → `customDomains` key | **present** | code IS deployed; now read its value |
+| `GET /api/health` → `customDomains: false` | | code deployed, **config not bound** (`FIREBASE_HOSTING_SITE` unset) |
+| `GET /api/health` → `customDomains: true` | | code deployed **and** configured |
+| `GET /api/domains/status` (no cookie) | **404** | route absent — same verdict as a missing health key |
+| `GET /api/domains/status` (no cookie) | **503** | route present, feature **unconfigured** |
+| `GET /api/domains/status` (no cookie) | **401** | route present **and configured** — you are simply not signed in. This is the healthy answer. |
+
+**The trap this ladder exists to avoid:** a green deploy is not a live feature.
+`deploy-realapp.yml` can finish successfully while `customDomains` is `false`,
+because the workflow's success only proves the revision shipped — not that
+`FIREBASE_HOSTING_SITE` was in the env set. Check the **value**, never just the
+deploy status. (Card `BpHnPUfH` adds exactly this assertion to the deploy smoke
+step so the gap cannot reappear silently.)
+
 ## Verify (downstream QA — not done in the build pipe)
 
 A live attach + DNS + cert verify is a manual QA step (it needs a real owned
