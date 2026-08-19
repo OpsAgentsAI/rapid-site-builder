@@ -221,10 +221,12 @@
     $('needs-tx').innerHTML = T('board.needs.tx');
     $('needs-later').onclick = () => { needs.style.display = 'none'; };
     $('needs-ok').onclick = () => {
+      // Dash-D: optimistic confirmation; decideAgentAction records the decision
+      // for real (audit + orchestrator turn) and restores the strip on failure.
       $('needs-tx').innerHTML = T('board.needs.approved');
       $('needs-ok').style.display = 'none'; $('needs-later').style.display = 'none';
-      resolved.uri = 'approved'; renderTeam();
-      setTimeout(() => { needs.style.display = 'none'; }, 3500);
+      decideAgentAction('uri', 'approve');
+      needsHideTimer = setTimeout(() => { needs.style.display = 'none'; }, 3500);
     };
   }
 
@@ -307,7 +309,77 @@
     }
   }
 
-  const resolved = {}; // agent id -> 'approved' | 'rejected' (in-card gates, local demo state)
+  const resolved = {}; // agent id -> 'approved' | 'rejected' (optimistic view of the recorded decision)
+
+  // ===== Dash-D: live approval actions =====
+  // A decision is LIVE-actionable only for the real same-session site — the same
+  // condition that shows the needs-you strip. Without one there is nothing real
+  // to decide on, so the gate renders disabled with the honest sample tag
+  // (STD D4: never fake a success).
+  const liveActions = () => !!(state && state.url);
+
+  // POST the decision to the server: audit line + one real orchestrator turn
+  // (see /api/agent-actions in server.js — same transport as Ask-Theo). Resolves
+  // on a recorded decision; throws only when nothing was recorded (caller rolls
+  // the optimistic render back).
+  async function postAgentAction(agentId, act) {
+    const r = await fetch(API + '/api/agent-actions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: agentId,
+        action: act,
+        business: state ? state.business : '',
+        siteUrl: state ? state.url : '',
+        deviceId: window.RSB_DEVICE || '',
+        lang: window.RSB_I18N ? RSB_I18N.lang : 'en'
+      })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || 'action failed');
+    return j;
+  }
+
+  // Transient honest failure notice — the rollback alone (buttons reappearing)
+  // is too easy to miss.
+  let toastTimer = null;
+  function gateToast(msg) {
+    let el = $('gate-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'gate-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+  }
+
+  // One decision handler for both surfaces (in-card gate + needs-you strip):
+  // optimistic render, real POST, rollback on failure. The audit + engine
+  // delivery happen server-side; success keeps the optimistic state.
+  let needsHideTimer = null; // the strip's pending auto-hide — cancelled on rollback
+  function decideAgentAction(agentId, act) {
+    if (!liveActions()) return; // sample state renders the buttons disabled anyway
+    const prev = resolved[agentId];
+    resolved[agentId] = act === 'approve' ? 'approved' : 'rejected';
+    renderTeam();
+    if (window.rsbTrack) rsbTrack('agent_action', { agent: agentId, action: act });
+    postAgentAction(agentId, act).catch(() => {
+      if (prev === undefined) delete resolved[agentId]; else resolved[agentId] = prev;
+      renderTeam();
+      const needs = $('needs');
+      if (agentId === 'uri' && needs && state && state.url) {
+        // restore the strip the optimistic path may have dismissed
+        clearTimeout(needsHideTimer);
+        needs.style.display = 'flex';
+        $('needs-tx').innerHTML = T('board.needs.tx');
+        $('needs-ok').style.display = ''; $('needs-later').style.display = '';
+      }
+      gateToast(T('board.gate.err'));
+    });
+  }
 
   function renderTeam() {
     const ran = new Set(state ? state.agentsRan || [] : []);
@@ -365,7 +437,13 @@
         <p class="last">${esc(last)}</p>
         ${metric ? `<div class="metric"><b>${esc(metric.value)}</b><span>${esc(metric.label)}</span></div>` : ''}
         ${feed.length ? `<ul class="cfeed">${feed.slice(0, 3).map(l => `<li><i>▸</i><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
-        ${showGate ? `<div class="gate"><span class="g-label">✋ ${esc(T('board.gate.label'))}</span><button class="rej" data-act="reject" data-id="${esc(a.id)}">${esc(T('board.gate.reject'))}</button><button class="app" data-act="approve" data-id="${esc(a.id)}">${esc(T('board.gate.approve'))}</button></div>` : ''}
+        ${showGate ? (() => {
+          // Dash-D: the decision buttons are real only for the live same-session
+          // site; in sample state they render disabled with an honest why —
+          // never a clickable control that fakes a success (STD D4).
+          const dis = liveActions() ? '' : ` disabled title="${esc(T('board.gate.sample.title'))}" aria-disabled="true"`;
+          return `<div class="gate"><span class="g-label">✋ ${esc(T('board.gate.label'))}</span><button class="rej" data-act="reject" data-id="${esc(a.id)}"${dis}>${esc(T('board.gate.reject'))}</button><button class="app" data-act="approve" data-id="${esc(a.id)}"${dis}>${esc(T('board.gate.approve'))}</button></div>`;
+        })() : ''}
         ${isLive || res ? '' : `<span class="sample">${esc(T('board.tag.sample'))}</span>`}
       </article>`;
     });
@@ -374,9 +452,9 @@
     // re-render — filtering and dragging both re-render, and dropping this wiring
     // would silently break the Uri approval gate.
     $('grid').querySelectorAll('.gate button').forEach(b => b.addEventListener('click', () => {
-      resolved[b.dataset.id] = b.dataset.act === 'approve' ? 'approved' : 'rejected';
+      if (b.disabled) return;
       if (b.dataset.act === 'approve') { const needs = $('needs'); if (needs) needs.style.display = 'none'; }
-      renderTeam();
+      decideAgentAction(b.dataset.id, b.dataset.act === 'approve' ? 'approve' : 'decline');
     }));
     wireDragReorder();
     applyFilter();
