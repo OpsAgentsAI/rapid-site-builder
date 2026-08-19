@@ -47,7 +47,14 @@ jobs:
             --region "$REGION" \
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
+            # Card KjHpbn3J step 4 (the safe half): min-instances 0. This service
+            # now backs only the RETIRED hackathon surfaces — every interactive
+            # route on them is 410/301, so all it still serves is published demo
+            # sites at /sites/**. Paying for a warm instance around the clock to
+            # hold open a surface whose whole purpose is to redirect elsewhere is
+            # the cost this card set out to stop. A cold start on a static
+            # published page is the right trade; --cpu-boost above covers it.
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
             --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|PUBLIC_BASE_URL=https://rapid-site-builder.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-site-builder.web.app,https://rapid-site-builder-he.web.app|GA4_MEASUREMENT_ID=G-T8S1JFMTH3|RETIRE_UNGATED=1|CANONICAL_APP_URL=https://builder.opsagents.agency" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
@@ -83,3 +90,49 @@ jobs:
         run: |
           sleep 5
           curl -sf -o /dev/null -w "hosting: %{http_code}\n" "https://rapid-site-builder.web.app/api/health"
+
+      # Card KjHpbn3J: the retirement is currently held up by ONE token —
+      # `RETIRE_UNGATED=1`, sitting inside a fifteen-variable single-line
+      # --set-env-vars above. Rule #20 means that line is rewritten in full on
+      # every deploy, so dropping that one token is a plausible edit — and if it
+      # went, anonymous /api/build would quietly start answering again, burning
+      # engine spend on a surface Michal retired on 2026-07-17, with every
+      # signal in this workflow still green. Nothing checked. Now something does.
+      #
+      # Asserted from the OUTSIDE, against the live hosts, after the deploy —
+      # not by grepping the env line, which would only prove we wrote the token,
+      # not that the running service honours it.
+      - name: Verify the retired surfaces stay retired
+        run: |
+          set -euo pipefail
+          CANON="https://builder.opsagents.agency"
+          fail=0
+          for host in rapid-site-builder rapid-site-builder-he; do
+            # Anonymous engine endpoints must be GONE.
+            for p in /api/build /api/publish /api/ask /api/import-site; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$host.web.app$p")
+              if [ "$code" != "410" ]; then
+                echo "::error::https://$host.web.app$p answered $code, expected 410 — the ungated engine is REACHABLE again (card KjHpbn3J). Check RETIRE_UNGATED=1 survived the --set-env-vars rewrite."
+                fail=1
+              fi
+            done
+            # The launch posts (LinkedIn, X, YouTube, the GitHub release) all
+            # link the old URLs. They must REDIRECT, never 404.
+            for p in / /board /campfire; do
+              got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://$host.web.app$p")
+              case "$got" in
+                301\ ${CANON}*) : ;;
+                *) echo "::error::https://$host.web.app$p gave '$got', expected a 301 to $CANON — a launch-post link is broken (card KjHpbn3J)."; fail=1 ;;
+              esac
+            done
+            # Published demo sites must keep resolving: /sites/** is the one path
+            # still served here, and the card's AC says public links must not
+            # break. A 301 or a 5xx here means the teardown went too far.
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$host.web.app/sites/__ci_probe_nonexistent__")
+            if [ "$code" != "404" ]; then
+              echo "::error::https://$host.web.app/sites/** answered $code, expected 404 from the app — published demo sites are no longer being served (card KjHpbn3J AC3)."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ]
+          echo "✅ both retired surfaces: engine 410, launch links 301, /sites/** still served."
