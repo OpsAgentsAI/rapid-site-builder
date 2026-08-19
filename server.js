@@ -753,6 +753,51 @@ app.get('/api/admin/sites', async (req, res) => {
   }
 });
 
+// ---- admin: tenant-grouped multi-tenant board (card 1BzUR9n2, Dash-E) --------------
+// Same gate + 404 posture as /api/admin/sites. The cross-tenant list is only ever
+// assembled server-side behind adminFromReq — the client NEVER reads the bucket
+// (it is private; every read in this app goes through this service). Grouping is
+// pure and unit-tested. Tenant identity: signed-in owner email → hashed device
+// key (the raw device id is a possession credential and stays server-side, like
+// ownerUid) → the anonymous bucket. lastActivity is the tenant's newest publish —
+// publishing is the only per-site activity this app records, so nothing richer
+// is claimed here.
+function groupTenants(sites) {
+  const by = new Map();
+  for (const s of sites || []) {
+    let kind, key, label;
+    if (s.ownerEmail) { kind = 'account'; key = 'acct:' + s.ownerEmail.toLowerCase(); label = s.ownerEmail; }
+    else if (s.deviceKey) { kind = 'device'; key = 'dev:' + s.deviceKey; label = 'device · ' + s.deviceKey; }
+    else { kind = 'anonymous'; key = 'anon'; label = 'anonymous publishes'; }
+    let t = by.get(key);
+    if (!t) { t = { key, kind, label, sites: [], lastActivity: '' }; by.set(key, t); }
+    t.sites.push({ id: s.id, business: s.business || '', createdAt: s.createdAt || '', url: s.url || '' });
+    if ((s.createdAt || '') > t.lastActivity) t.lastActivity = s.createdAt || '';
+  }
+  const tenants = [...by.values()];
+  for (const t of tenants) {
+    t.sites.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    t.siteCount = t.sites.length;
+  }
+  tenants.sort((a, b) => (b.lastActivity || '').localeCompare(a.lastActivity || ''));
+  return tenants;
+}
+
+app.get('/api/admin/tenants', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!adminFromReq(req)) return res.status(404).json({ error: 'Not found.' });
+  try {
+    const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0];
+    const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+    const base = PUBLIC_BASE_URL || `${proto}://${host}`;
+    const all = (await listAllSites()).map(s => ({ ...s, url: `${base}/sites/${s.id}` }));
+    const tenants = groupTenants(all);
+    res.json({ tenants, tenantCount: tenants.length, siteCount: all.length });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e).slice(0, 200) });
+  }
+});
+
 // ---- pages + health ---------------------------------------------------------------
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'web', 'index.html')));
 app.get(['/board', '/board/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'board', 'index.html')));
@@ -800,4 +845,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { app, cleanBrief, limiter, fallbackSpec };
+module.exports = { app, cleanBrief, limiter, fallbackSpec, groupTenants };

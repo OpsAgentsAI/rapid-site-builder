@@ -38,6 +38,10 @@
   a:hover{text-decoration:underline}
   .muted{color:var(--ink-3)}
   .state{padding:48px 20px;text-align:center;color:var(--ink-2)}
+  /* Dash-E: tenant group rows + lazy pagination */
+  tr.tenant td{background:#FAFBFE;font-weight:700;font-size:13.5px}
+  tr.tenant .kind{display:inline-block;margin-inline-end:8px}
+  .more-wrap{padding:16px;text-align:center;border-top:1px solid var(--border)}
   .state h2{font-size:17px;margin:0 0 6px}
   code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#F1F2F8;padding:2px 6px;border-radius:6px}
 </style>
@@ -46,8 +50,8 @@
 <div class="wrap">
   <header>
     <div>
-      <h1>🛠️ Admin — Published sites</h1>
-      <div class="sub">Every site published on Rapid Site Builder, newest first. Admin-only (card fp7wXxjb).</div>
+      <h1>🛠️ Admin — Tenants &amp; sites</h1>
+      <div class="sub">Every tenant on Rapid Site Builder — their sites, newest activity first. Admin-only (cards fp7wXxjb + 1BzUR9n2).</div>
     </div>
     <div id="who"></div>
   </header>
@@ -67,29 +71,58 @@
 
   function state(html){ content.innerHTML = '<div class="state">'+html+'</div>'; }
 
-  function renderTable(sites){
-    if(!sites.length){ state('<h2>No published sites yet</h2><p class="muted">Sites appear here as visitors publish.</p>'); return; }
-    var rows = sites.map(function(s){
-      return '<tr>'+
-        '<td class="biz">'+esc(s.business||'(untitled)')+'</td>'+
-        '<td><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.id)+'</a></td>'+
-        '<td>'+(s.ownerEmail?esc(s.ownerEmail):'<span class="muted">anonymous</span>')+'</td>'+
-        '<td class="muted">'+esc(fmt(s.createdAt))+'</td>'+
-      '</tr>';
+  // Dash-E (card 1BzUR9n2): tenant-grouped view off GET /api/admin/tenants —
+  // the grouping (and the cross-tenant read itself) is server-side behind the
+  // admin gate; this page only renders what the gated endpoint returned. Lazy
+  // pagination: the first PAGE tenants render immediately, the rest behind a
+  // "show more" button, so the page stays fast as tenants grow.
+  var PAGE = 50;
+  var shownTenants = PAGE;
+  var data = null;
+
+  var KIND = { account: '👤', device: '📱', anonymous: '🌐' };
+
+  function renderTenants(){
+    var tenants = (data && data.tenants) || [];
+    if(!tenants.length){ state('<h2>No published sites yet</h2><p class="muted">Tenants appear here as visitors publish.</p>'); return; }
+    var rows = tenants.slice(0, shownTenants).map(function(t){
+      var head = '<tr class="tenant"><td colspan="4">'+
+        '<span class="kind" title="'+esc(t.kind)+'">'+(KIND[t.kind]||'')+'</span>'+esc(t.label)+
+        ' <span class="muted">· '+t.siteCount+(t.siteCount===1?' site':' sites')+
+        ' · last activity '+esc(fmt(t.lastActivity))+'</span></td></tr>';
+      var siteRows = t.sites.map(function(s){
+        return '<tr>'+
+          '<td class="biz">'+esc(s.business||'(untitled)')+'</td>'+
+          '<td><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.id)+'</a></td>'+
+          '<td class="muted">'+esc(fmt(s.createdAt))+'</td>'+
+          // Agent status is honest: publishing is the only per-site activity this
+          // app records, so no live agent telemetry is claimed here — the
+          // read-only board drill-in shows the operate roster with its own
+          // live/sample honesty.
+          '<td><a href="/board?site='+encodeURIComponent(s.id)+'&biz='+encodeURIComponent(s.business||'')+'">Agent board (read-only)</a>'+
+          '<div class="muted" style="font-size:12px">no live telemetry recorded</div></td>'+
+        '</tr>';
+      }).join('');
+      return head + siteRows;
     }).join('');
+    var moreCount = tenants.length - shownTenants;
     content.innerHTML =
-      '<table><thead><tr><th>Business</th><th>Site</th><th>Owner</th><th>Published</th></tr></thead>'+
-      '<tbody>'+rows+'</tbody></table>';
+      '<table><thead><tr><th>Business</th><th>Site</th><th>Published</th><th>Agents</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table>'+
+      (moreCount > 0 ? '<div class="more-wrap"><button id="more" class="ghost">Show '+Math.min(PAGE, moreCount)+' more tenants ('+moreCount+' left)</button></div>' : '');
+    var m = document.getElementById('more');
+    if(m) m.onclick = function(){ shownTenants += PAGE; renderTenants(); };
   }
 
   function load(){
-    return fetch('/api/admin/sites', { credentials:'same-origin' }).then(function(r){
+    return fetch('/api/admin/tenants', { credentials:'same-origin' }).then(function(r){
       if(r.status===404){ throw { notAdmin:true }; }
       if(!r.ok){ throw new Error('HTTP '+r.status); }
       return r.json();
     }).then(function(d){
-      who.innerHTML = '<span class="pill">'+(d.count||0)+' sites</span>';
-      renderTable(d.sites||[]);
+      data = d;
+      who.innerHTML = '<span class="pill">'+(d.tenantCount||0)+' tenants · '+(d.siteCount||0)+' sites</span>';
+      renderTenants();
     });
   }
 
