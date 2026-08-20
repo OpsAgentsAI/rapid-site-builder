@@ -35,3 +35,67 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # ── Workflow linting (card rFZrx6fL) ────────────────────────────────────────
+  # `test` above runs npm test. Nothing in this repo has ever PARSED a workflow
+  # file, and deploy.yml only fires on push to main — so its first execution is
+  # the production deploy. PR #57 reached MERGEABLE/CLEAN with `test` and
+  # `preview` both SUCCESS while carrying a `#` comment between two
+  # backslash-continued lines, which silently truncated `gcloud run deploy`
+  # before --set-env-vars. Per Cloud Run rule #20 that REPLACES the env set:
+  # merging it would have wiped all 14 keys on rapid-builder-proxy, including
+  # the RETIRE_UNGATED=1 flag that same PR existed to protect.
+  workflows:
+    name: Lint workflow files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # actionlint's analysis of `run:` blocks IS shellcheck — it shells out to
+      # it. With shellcheck absent or disabled, actionlint parses the YAML,
+      # finds the workflow well-formed and EXITS 0 on the truncated-deploy
+      # script above. Measured, not assumed: `actionlint -shellcheck=` on PR
+      # #57's own head exits 0. shellcheck ships on ubuntu-latest today, but a
+      # runner-image change that dropped it would turn this job into a green
+      # light that checks nothing — the exact failure it was built to catch, one
+      # level up. So its absence is a hard failure, never a silent downgrade.
+      - name: Require shellcheck (actionlint is vacuous without it)
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            echo "::error::shellcheck is not installed on this runner."
+            echo "actionlint would skip every run: block and exit 0 — a guard that cannot fail."
+            exit 1
+          fi
+          shellcheck --version
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          curl -sSfL -o /tmp/download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /usr/local/bin
+          actionlint --version
+
+      # TRUE-NEGATIVE CONTROL, taken BEFORE the real lint and deliberately so.
+      # A linter that reports nothing is indistinguishable from a linter that is
+      # broken, mis-configured, or silently running without its shellcheck half.
+      # This asserts the guard can still FAIL — on this runner, in this run, on
+      # the exact defect it exists for — before its silence on the real
+      # workflows is allowed to mean anything.
+      - name: Self-test — the linter must still catch a truncated continuation
+        run: |
+          fixture=.github/workflow-lint-selftest/truncated-continuation.yml
+          test -f "$fixture" || { echo "::error::self-test fixture missing: $fixture"; exit 1; }
+          out=$(actionlint -no-color -oneline "$fixture" || true)
+          echo "$out"
+          case "$out" in
+            *SC2215*) echo "OK: the linter still reports SC2215 on the known-bad shape." ;;
+            *) echo "::error::self-test FAILED — the linter did not flag the known-bad workflow."
+               echo "Do NOT trust a green result from the step below until this is fixed."
+               exit 1 ;;
+          esac
+
+      - name: Lint every workflow
+        run: actionlint -color
+
