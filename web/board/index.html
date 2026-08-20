@@ -177,6 +177,11 @@ body{font-family:var(--font-body);background:var(--canvas);color:var(--ink);line
 .gate button{min-height:36px;padding:0 14px;font:600 13.5px var(--font-body);border-radius:var(--radius-sm);cursor:pointer}
 .gate .rej{color:var(--ink-2);background:var(--surface-sunken);border:1px solid var(--border)}
 .gate .app{color:#fff;background:var(--brand-gradient);border:0;font-weight:700}
+/* Dash-D: sample state — the decision buttons exist but are honestly inert */
+.gate button:disabled{opacity:.45;cursor:not-allowed}
+/* Dash-D: transient failure notice for a rolled-back decision */
+#gate-toast{position:fixed;inset-inline-start:50%;transform:translateX(-50%) translateY(12px);bottom:22px;z-index:60;max-width:min(92vw,440px);background:var(--ink);color:var(--surface,#fff);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:12px 18px;font:600 13.5px var(--font-body);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+#gate-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .foot{margin-top:36px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
 .back{display:inline-flex;align-items:center;gap:8px;margin-top:8px;color:var(--brand-orange);font-weight:700;font-size:14px;text-decoration:none}
 .back:hover{text-decoration:underline}

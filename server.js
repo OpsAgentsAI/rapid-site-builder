@@ -16,6 +16,7 @@
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const engine = require('./lib/engine');
 const { render } = require('./lib/renderer');
 const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = require('./lib/images');
@@ -651,6 +652,63 @@ app.post('/api/ask', async (req, res) => {
     posthog.captureException(e, 'ask', { route: '/api/ask' });
     res.status(502).json({ error: String((e && e.message) || e).slice(0, 200) });
   }
+});
+
+// ---- agent actions: the client's approve/decline decision (card 7uOa4dJ8) ---------
+// The board's approval gate used to be pure in-page demo state. This is its real
+// counterpart: the decision is RECORDED (structured audit line + PostHog event)
+// and, when the engine is configured, DELIVERED to the live orchestrator as one
+// real turn — the same transport /api/ask uses. This endpoint never publishes,
+// never mutates a site, and rides the build rate budget like /api/ask.
+const ACTION_AGENTS = new Set([
+  'aria', 'leo', 'noa', 'sam', 'max', 'phoenix',
+  'vera', 'ben', 'uri', 'gil', 'tova', 'cara'
+]);
+app.post('/api/agent-actions', async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  if (!rateOk(req)) return res.status(429).json({ error: 'Rate limit reached — try again in a bit.' });
+  const body = req.body || {};
+  const agent = String(body.agent || '').toLowerCase().trim();
+  const action = body.action === 'approve' ? 'approve' : body.action === 'decline' ? 'decline' : null;
+  if (!ACTION_AGENTS.has(agent) || !action) {
+    return res.status(400).json({ error: 'Unknown agent or action.' });
+  }
+  const business = String(body.business || '').slice(0, 120);
+  const siteUrl = String(body.siteUrl || '').slice(0, 200);
+  const deviceId = /^[a-f0-9]{32}$/.test(String(body.deviceId || '')) ? String(body.deviceId) : '';
+  const session = auth.AUTH_ENABLED ? auth.sessionFromReq(req) : null;
+  // who/what/when — the audit line the whole feature hangs on. `who` prefers the
+  // signed-in identity; the anonymous device id is possession-scoped like the
+  // rest of the device-memory flow; a bare visitor is honestly 'anonymous'.
+  const who = (session && session.email) || (deviceId ? 'device:' + deviceId : 'anonymous');
+  const at = new Date().toISOString();
+  const id = 'act_' + Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
+  console.log(JSON.stringify({ audit: 'agent_action', id, who, agent, action, business, siteUrl, at }));
+  posthog.capture(id, 'agent_action_recorded', { who, agent, action, business, at });
+
+  // Deliver the decision to the live orchestrator — a real Agent Engine turn.
+  // Failure here never voids the request: the decision is already recorded, so
+  // the client keeps an honest `engineNotified:false` instead of a rollback.
+  let ack = '';
+  if (engine.ENABLED) {
+    const he = body.lang === 'he';
+    const prompt =
+      'You are Theo, the orchestrator of the AI web team operating the client\'s website' +
+      (business ? ` ("${business}"${siteUrl ? ', live at ' + siteUrl : ''})` : '') + '. ' +
+      `The client just ${action === 'approve' ? 'APPROVED' : 'DECLINED'} the pending proposal from your ${agent} agent. ` +
+      (action === 'approve'
+        ? 'Acknowledge the approval to the client in 1-2 warm sentences and say the team will proceed carefully.'
+        : 'Acknowledge the decision to the client in 1-2 warm sentences and confirm nothing will change without them.') +
+      ' Do not call any tools, do not transfer to another agent, do not publish anything.' +
+      (he ? ' Reply in Hebrew.' : ' Reply in English only.');
+    try {
+      const reply = await engine.oneTurn(prompt, 20000);
+      ack = (he ? reply : englishOnly(reply)).slice(0, 400);
+    } catch (e) {
+      posthog.captureException(e, id, { route: '/api/agent-actions', agent, action });
+    }
+  }
+  res.json({ ok: true, id, at, engineNotified: !!ack, ack });
 });
 
 // ---- cache warm (operator-only; WARM_KEY is set at deploy time) -------------------
