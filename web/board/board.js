@@ -230,7 +230,39 @@
     };
   }
 
+  // Dash-E (card 1BzUR9n2): read-only drill-in for a site this device does NOT
+  // own — /board?site=<id>[&biz=<name>] from the admin multi-tenant view. Built
+  // from PUBLIC data only (the published site's own /sites/<id> URL); it always
+  // paints the REDUCED view (live=false), so no needs-you strip, no live agent
+  // claims, and nothing to act on — read-only by construction. Ids this device
+  // already knows keep their existing paths (live state / mySites / switcher).
+  function deepLinkSite() {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const q = String(p.get('site') || '');
+      if (!/^[a-f0-9]{8}$/.test(q)) return null;
+      return {
+        id: q,
+        business: String(p.get('biz') || '').slice(0, 120),
+        url: window.location.origin + '/sites/' + q
+      };
+    } catch { return null; }
+  }
+  function knownLocally(id) {
+    if (state && state.id === id) return true;
+    try {
+      const mine = JSON.parse(localStorage.getItem('my_sites') || '[]');
+      return Array.isArray(mine) && mine.some(s => s && s.id === id);
+    } catch { return false; }
+  }
+
   function renderTheo() {
+    const deep = deepLinkSite();
+    if (deep && !knownLocally(deep.id)) {
+      selectedId = deep.id;
+      paintHero(deep, false);
+      return;
+    }
     if (state && state.url) {
       selectedId = state.id || null;
       paintHero({ id: state.id, business: state.business, url: state.url }, true);
