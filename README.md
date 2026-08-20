@@ -24,8 +24,10 @@ This repo ships **two live surfaces from two branches**, deliberately. They are 
 
 `main` is the Devpost demo: no login, anyone can build and publish. `real-app` is where the product is
 built — accounts, `ownerUid`-scoped sites, the post-login operate board — and it is the branch that
-carries ongoing work. Each surface has its own CI too: `preview.yml` gates PRs into `main`,
-`ci-realapp.yml` gates PRs into `real-app`.
+carries ongoing work. Each surface has its own **deploy** rail, but **CI is shared**: `ci.yml` runs
+`npm test` on every PR to **both** `main` and `real-app` — it is the real merge gate. `preview.yml`
+additionally deploys a Hosting preview channel for `main` PRs and smoke-tests `/board` + `/api/health`;
+it never runs the test suite, so it is not the gate. `ci-realapp.yml` adds real-app-specific checks.
 
 > **The consequence worth stating outright: a feature can be live in production and absent from `main`,
 > and that is by design.** Reading `main`'s tree or its commit history answers "is this on the hackathon
