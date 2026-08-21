@@ -16,7 +16,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { canonicalFindings, healthIsContextOnly } = require('../lib/canonicalLive');
-const { placementFindings, envKeys } = require('../lib/retireFlagPlacement');
+const { placementFindings, envKeys, envVarLiterals } = require('../lib/retireFlagPlacement');
 
 const CANON = 'https://builder.opsagents.agency';
 const WF = (name) => fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', name), 'utf8');
@@ -166,6 +166,71 @@ test('placement VACUITY: fewer than two workflow files read is a broken scan', (
   const r = placementFindings({ 'deploy.yml': 'x' });
   assert.strictEqual(r.broken, true);
   assert.match(r.findings[0], /SCAN LOOKS BROKEN, NOT CLEAN/);
+});
+
+// ── quote shape: the guard must not depend on how the value happens to be typed ──
+//
+// These four FAIL against the previous double-quote-only regex
+// (/--set-env-vars\s+"([^"]*)"/g). The first is the one that matters: it fails
+// SILENTLY there — zero literals, present = false, no finding at all — which is
+// the same one-directional blindness this whole card is about, reproduced
+// inside the guard written to fix it.
+
+test('QUOTE SHAPE — THE UNSAFE DIRECTION: a SINGLE-quoted leak on the canonical workflow is caught', () => {
+  // deploy.yml keeps double quotes so ONLY the realapp side changes shape. Under
+  // the old regex that side yielded no literals => present = false => the leaked
+  // RETIRE_UNGATED produced NO finding whatsoever. Silent pass, prod retired.
+  const r = placementFindings({
+    'deploy.yml': 'run: --set-env-vars "^|^A=1|RETIRE_UNGATED=1"',
+    'deploy-realapp.yml': "run: --set-env-vars 'A=1,RETIRE_UNGATED=1'"
+  });
+  assert.strictEqual(r.broken, false, 'a leak is a finding, not a broken scan');
+  assert.strictEqual(r.findings.length, 1, r.findings.join(' | '));
+  assert.match(r.findings[0], /deploys the CANONICAL product/);
+});
+
+test('QUOTE SHAPE: an UNQUOTED leak on the canonical workflow is caught', () => {
+  const r = placementFindings({
+    'deploy.yml': 'run: --set-env-vars "^|^A=1|RETIRE_UNGATED=1"',
+    'deploy-realapp.yml': 'run: --set-env-vars A=1,RETIRE_UNGATED=1 --region me-west1'
+  });
+  assert.strictEqual(r.findings.length, 1, r.findings.join(' | '));
+  assert.match(r.findings[0], /deploys the CANONICAL product/);
+});
+
+test('QUOTE SHAPE: single-quoted and unquoted and --set-env-vars= all read as literals', () => {
+  assert.deepStrictEqual(envVarLiterals('run: --set-env-vars "A=1,B=2"'), ['A=1,B=2']);
+  assert.deepStrictEqual(envVarLiterals("run: --set-env-vars 'A=1,B=2'"), ['A=1,B=2']);
+  assert.deepStrictEqual(envVarLiterals('run: --set-env-vars A=1,B=2 \\'), ['A=1,B=2']);
+  assert.deepStrictEqual(envVarLiterals('run: --set-env-vars=A=1,B=2'), ['A=1,B=2']);
+  // the ^|^ delimiter survives every shape, so envKeys still splits correctly
+  assert.deepStrictEqual(envKeys(envVarLiterals("run: --set-env-vars '^|^A=1|RETIRE_UNGATED=1'")[0]),
+    ['A', 'RETIRE_UNGATED']);
+  assert.deepStrictEqual(envKeys(envVarLiterals('run: --set-env-vars ^|^A=1|RETIRE_UNGATED=1')[0]),
+    ['A', 'RETIRE_UNGATED']);
+});
+
+test('QUOTE SHAPE: the flag DROPPED from a single-quoted deploy.yml still reds', () => {
+  // The safe direction, asserted so the fix is not one-directional either.
+  const r = placementFindings({
+    'deploy.yml': "run: --set-env-vars '^|^A=1|B=2'",
+    'deploy-realapp.yml': "run: --set-env-vars 'A=1'"
+  });
+  assert.strictEqual(r.findings.length, 1, r.findings.join(' | '));
+  assert.match(r.findings[0], /no longer sets RETIRE_UNGATED/);
+});
+
+test('QUOTE SHAPE CRY-WOLF CONTROL: the wider regex must not red on prose or echo strings', () => {
+  // The bare-word arm is the new false-positive risk. Both narrowings are pinned
+  // here: full-line comments are stripped, and a bare value must contain `=`.
+  const r = placementFindings({
+    'deploy.yml': '# --set-env-vars RETIRE_UNGATED=1 is what retires this surface\nrun: --set-env-vars "^|^A=1|RETIRE_UNGATED=1"',
+    'deploy-realapp.yml':
+      '# NOTE: never pass --set-env-vars RETIRE_UNGATED=1 here — it would retire the product.\n' +
+      'run: --set-env-vars "A=1"\n' +
+      'run: echo "check RETIRE_UNGATED=1 survived the --set-env-vars rewrite."'
+  });
+  assert.deepStrictEqual(r.findings, [], r.findings.join(' | '));
 });
 
 test('envKeys honours gcloud\'s ^|^ custom delimiter as well as commas', () => {
