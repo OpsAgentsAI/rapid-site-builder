@@ -157,6 +157,60 @@ function limiter(max) {
   take.peek = (req) => live(key(req), Date.now()).length < max;
   return take;
 }
+/**
+ * A single hourly budget shared by ALL anonymous callers — card WWGnAZUR.
+ *
+ * WHY THE PER-IP LIMITER IS NOT ENOUGH ANY MORE
+ * `limiter()` above is per-IP, and until now it was the only thing between an
+ * unauthenticated request and a real Vertex-billed build. That was sized for a
+ * hackathon surface nobody had been handed a link to. It no longer is: every
+ * client demo deck now CLOSES on https://builder.opsagents.agency/ and invites
+ * the recipient to "type a brief and watch it build" — so the link goes to
+ * client-side decision makers, their phones, their colleagues, and every
+ * crawler that follows a link in a deck. A per-IP budget bounds one visitor and
+ * says nothing about a thousand of them: N unique IPs cost N × RATE_MAX builds.
+ *
+ * WHAT THIS IS, EXACTLY
+ * A ceiling on anonymous spend per instance-hour. It is deliberately generous —
+ * a live meeting demo runs one to three builds — and it is env-tunable, so the
+ * answer to "it fired during a demo" is a number, not a redeploy of new logic.
+ *
+ * WHAT IT IS NOT: fleet-wide. Like `limiter`, the counter lives in this
+ * process's memory, so the real ceiling is ANON_BUILDS_PER_HOUR × live
+ * instances, and it resets when an instance recycles. Stated plainly rather
+ * than implied away: it converts "unbounded, given enough IPs" into "bounded
+ * per instance", which is the difference that matters here. A fleet-wide budget
+ * needs shared state and is its own card.
+ *
+ * SIGNED-IN CALLERS ARE EXEMPT. The operator running the meeting demo is signed
+ * in; deck traffic is not. Capping the anonymous pool therefore cannot cost
+ * Michal a demo — which is the property that makes shipping this safe without
+ * waiting on the anonymous-first-touch product decision the card also raises.
+ */
+function hourlyBudget(max) {
+  let hits = [];
+  const live = (now) => hits.filter((t) => now - t < 3600_000);
+  const take = () => {
+    const now = Date.now();
+    hits = live(now);
+    if (hits.length >= max) return false;
+    hits.push(now);
+    return true;
+  };
+  take.peek = () => live(Date.now()).length < max;
+  take.max = max;
+  return take;
+}
+const ANON_BUILDS_PER_HOUR = Number(process.env.ANON_BUILDS_PER_HOUR) || 60;
+const anonBuildBudget = hourlyBudget(ANON_BUILDS_PER_HOUR);
+
+/** Is this caller signed in? False whenever auth is off — then nobody is. */
+function isSignedIn(req) {
+  if (!auth.AUTH_ENABLED) return false;
+  const s = auth.sessionFromReq(req);
+  return !!(s && s.uid);
+}
+
 const rateOk = limiter(RATE_MAX);         // builds are the expensive op
 const uploadRateOk = limiter(UPLOAD_RATE_MAX); // signed upload URLs
 const IMPORT_RATE_MAX = Number(process.env.IMPORTS_PER_HOUR_PER_IP) || 20;
@@ -307,6 +361,22 @@ app.post('/api/import-site', async (req, res) => {
 // ---- SSE build -----------------------------------------------------------------
 app.post('/api/build', async (req, res) => {
   if (!rateOk(req)) return res.status(429).json({ error: 'Rate limit reached — try again in a bit.' });
+  // Card WWGnAZUR — the anonymous pool's own ceiling, checked AFTER the per-IP
+  // budget so one noisy visitor spends their own slots first. Signed-in callers
+  // (the operator demoing in a meeting) never reach this gate.
+  if (!isSignedIn(req) && !anonBuildBudget()) {
+    // Loud, not silent: an exhausted budget is either a demo that outgrew the
+    // number or someone pointing a crawler at the engine, and both are things
+    // to see rather than infer from a bill.
+    console.warn('anon build budget exhausted', { max: ANON_BUILDS_PER_HOUR });
+    posthog.capture('anon_budget_' + Date.now().toString(36), 'anon_build_budget_exhausted', {
+      max_per_hour: ANON_BUILDS_PER_HOUR
+    });
+    return res.status(429).json({
+      error: 'The free demo has reached its hourly limit. Sign in to keep building, or try again shortly.',
+      code: 'anon_engine_budget_exhausted'
+    });
+  }
   const brief = cleanBrief(req.body || {});
   if (!brief) return res.status(400).json({ error: 'Tell us at least a business name or a one-line description.' });
   if (!engine.ENABLED) return res.status(503).json({ error: 'Agent Engine is not configured on this deployment.' });
@@ -845,4 +915,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { app, cleanBrief, limiter, fallbackSpec, groupTenants };
+module.exports = { app, cleanBrief, limiter, hourlyBudget, fallbackSpec, groupTenants };
