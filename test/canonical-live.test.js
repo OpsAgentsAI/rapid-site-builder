@@ -1,5 +1,5 @@
 'use strict';
-// Card sMdKZ7pQ — the retirement is asserted in one direction only.
+// Card 6kf27M5o — the retirement is asserted in one direction only.
 //
 // deploy.yml proves the RETIRED hosts stay retired. Nothing proved the place
 // they all redirect to — builder.opsagents.agency, the URL every client demo

@@ -266,7 +266,7 @@ jobs:
           [ "$fail" -eq 0 ]
           echo "✅ both retired surfaces: engine 410, launch links 301, /sites/** still served."
 
-      # ── The OTHER direction (card sMdKZ7pQ) ─────────────────────────────────
+      # ── The OTHER direction (card 6kf27M5o) ─────────────────────────────────
       # Everything above proves the retired hosts stay retired, and that they
       # redirect to $CANON. Nothing proved $CANON answers. It is the URL every
       # client demo deck now closes with (Pealton section 07, Ford section 04,

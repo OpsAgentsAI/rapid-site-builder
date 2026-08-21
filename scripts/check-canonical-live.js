@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// ── The other direction of the retirement check (card sMdKZ7pQ) ──────────────
+// ── The other direction of the retirement check (card 6kf27M5o) ──────────────
 //
 // deploy.yml's "Verify the retired surfaces stay retired" step asserts, after
 // every deploy, that the two hackathon hosts are GONE and redirect to
