@@ -1,4 +1,30 @@
-name: Deploy
+name: Deploy STAGING (auto on main)
+
+# ── TIER MAP — read this before editing either deploy workflow (card g0pH1JZX) ──
+#
+# | tier    | Cloud Run            | Hosting site            | trigger                    |
+# |---------|----------------------|-------------------------|----------------------------|
+# | STAGING | rapid-builder-proxy  | rapid-site-builder      | push:main — THIS FILE      |
+# | PROD    | rapid-builder-app    | rapid-site-builder-app  | workflow_dispatch —        |
+# |         |                      |                         | .github/workflows/deploy-realapp.yml |
+#
+# A prod dispatch deploys whatever REF it is dispatched on — that workflow's own
+# header records `real-app` as its historical branch. Check the ref you pick; it
+# is not implied by the workflow.
+#
+# 🚨 THE NAMES READ BACKWARDS. The site called `rapid-site-builder` is STAGING;
+# `rapid-site-builder-app` is PROD. Anyone skimming will "fix" this the wrong way
+# round. Say which TIER you mean in every comment you add here, never just the
+# site name.
+#
+# `builder.opsagents.agency` is bound to the PROD site (rapid-site-builder-app).
+# It served 2026-08-17 bytes for four days because every merge deployed green to
+# STAGING while the domain pointed at PROD — the deploys were landing on a
+# different site than the domain serves. Michal's decision (2026-08-21, option B)
+# was to formalise the two sites as two tiers rather than repoint the domain.
+#
+# So: pushing to main does NOT ship the customer-facing builder. A prod release
+# is a deliberate dispatch of deploy-realapp.yml.
 
 on:
   push:
@@ -20,7 +46,10 @@ env:
   HOSTING_SITE: rapid-site-builder
 
 jobs:
-  deploy:
+  # STAGING tier. Functionally unchanged by card g0pH1JZX — only named for what
+  # it has always been, so the next reader is not misled by the site name.
+  deploy-staging:
+    name: Deploy STAGING (rapid-builder-proxy + rapid-site-builder)
     runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
@@ -34,7 +63,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy Cloud Run
+      - name: Deploy Cloud Run — STAGING (rapid-builder-proxy)
         run: |
           # --set-env-vars uses a custom delimiter (^|^) so the comma-separated
           # ALLOWED_ORIGINS value is NOT mis-parsed as additional env-var pairs.
@@ -70,14 +99,14 @@ jobs:
           gcloud run services update-traffic "$SERVICE" --to-latest \
             --project "$PROJECT_ID" --region "$REGION" --quiet
 
-      - name: Smoke test Cloud Run
+      - name: Smoke test Cloud Run — STAGING
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
           curl -sf "$URL/api/health" | tee /tmp/health.json
           grep -q '"agentEngine":true' /tmp/health.json
 
-      - name: Deploy Firebase Hosting via Cloud Build (native metadata ADC)
+      - name: Deploy Firebase Hosting — STAGING sites, via Cloud Build (native metadata ADC)
         run: |
           # Bake the Cloud Run URL into the static pages (long SSE builds bypass the
           # Hosting proxy 60s cap), THEN ship the baked source to Cloud Build.
@@ -95,7 +124,7 @@ jobs:
             --config=cloudbuild-hosting.yaml \
             --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
 
-      - name: Smoke test Hosting
+      - name: Smoke test Hosting — STAGING
         run: |
           sleep 5
           curl -sf -o /dev/null -w "hosting: %{http_code}\n" "https://rapid-site-builder.web.app/api/health"

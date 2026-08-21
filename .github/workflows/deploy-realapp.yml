@@ -22,6 +22,12 @@ name: Deploy Real App (auth-ON, separate surface)
 # Final gate is operator-only: one real Google sign-in QA (the "verify it's you"
 # wall can't be driven headlessly).
 
+# ── TIER MAP (card g0pH1JZX) ────────────────────────────────────────────────
+# THIS FILE IS THE **PROD** TIER: rapid-builder-app + rapid-site-builder-app,
+# which is what `builder.opsagents.agency` actually serves.
+# STAGING is deploy.yml -> rapid-builder-proxy + rapid-site-builder, on push:main.
+# 🚨 The names read backwards — `rapid-site-builder` is STAGING. Say the TIER.
+
 on:
   workflow_dispatch:
 
@@ -57,8 +63,27 @@ jobs:
 
       - name: Deploy Cloud Run (auth ON)
         run: |
-          # Full canonical env set (rule #20: --set-env-vars REPLACES, so the list
-          # must be complete) = the hackathon set PLUS the three auth vars that flip
+          # ⚠️ --update-env-vars, NOT --set-env-vars (rule #20, card g0pH1JZX).
+          #
+          # This line WAS --set-env-vars, which REPLACES. Diffed against the live
+          # service on 2026-08-21 (`gcloud run services describe rapid-builder-app`),
+          # it carried 14 keys while the service carries 17 — so the next dispatch
+          # would have DELETED three that nothing here sets:
+          #     PAID_TIER_UIDS          <- paid users lose their entitlement
+          #     FIREBASE_HOSTING_SITE
+          #     FIREBASE_HOSTING_PROJECT
+          # SESSION_SECRET survived only because --set-secrets below names it.
+          #
+          # --update-env-vars MERGES: it writes the keys named here and leaves
+          # every other key on the service alone. That is the correct tool for a
+          # deploy that does not own the full env set — and this one does not,
+          # because PAID_TIER_UIDS is edited operationally, not in this file.
+          #
+          # The ^|^ delimiter is required: ALLOWED_ORIGINS contains a comma, and
+          # under the default delimiter gcloud reads it as more env-var pairs
+          # ("Bad syntax for dict arg"). Same reason deploy.yml uses it.
+          #
+          # The auth vars that flip
           # AUTH_ENABLED on (FIREBASE_PROJECT_ID + FIREBASE_API_KEY + SESSION_SECRET;
           # FIREBASE_AUTH_DOMAIN = opsagent-staging.firebaseapp.com (the project default).
           # Its /__/auth/handler redirect URI is pre-registered on the auto-provisioned
@@ -73,7 +98,7 @@ jobs:
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
-            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=global,IMAGE_MODEL=gemini-3-pro-image-preview,WARM_KEY=${{ secrets.WARM_KEY }},FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com,PUBLIC_BASE_URL=https://rapid-site-builder-app.web.app,PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }},ALLOWED_ORIGINS=https://rapid-site-builder-app.web.app" \
+            --update-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://builder.opsagents.agency|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://builder.opsagents.agency,https://rapid-site-builder-app.web.app" \
             --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
