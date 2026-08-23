@@ -27,8 +27,18 @@
 // edit to the pin rather than a silent deletion in production.
 //
 // TIER NAMING (the names read backwards — say the tier, never the site name):
-//   STAGING = deploy.yml       -> rapid-builder-proxy + rapid-site-builder
-//   PROD    = deploy-realapp.yml -> rapid-builder-app + rapid-site-builder-app
+//   RETIRED     = deploy.yml          job deploy-staging     -> rapid-builder-proxy   + rapid-site-builder(-he)
+//   APP-STAGING = deploy.yml          job deploy-app-staging -> rapid-builder-app-stg + rapid-builder-stg
+//   PROD        = deploy-realapp.yml                         -> rapid-builder-app     + rapid-site-builder-app
+//
+// APP-STAGING was added by card rQunsPko. Note what that does to the file-wide
+// assertions below: deploy.yml now contains TWO `gcloud run deploy` invocations,
+// so a match-anywhere regex can attribute a flag to the wrong tier. Everything
+// added for the new tier is therefore scoped to its JOB BLOCK first (see
+// jobBlock). The pre-existing STAGING/PROD assertions are left exactly as they
+// were — they still hold, because deploy.yml carries exactly one
+// --set-env-vars and that one belongs to the retired tier, which is itself now
+// an assertion rather than a coincidence.
 //
 // PROD deliberately uses --update-env-vars (MERGE). Its own header records that
 // the line WAS --set-env-vars and had to be changed. Symmetry is the obvious
@@ -127,4 +137,135 @@ test('the two tiers stay distinguishable — each targets its own service + site
   assert.match(staging, /HOSTING_SITE:\s*rapid-site-builder\s*$/m);
   assert.match(prod, /SERVICE:\s*rapid-builder-app\b/);
   assert.match(prod, /HOSTING_SITE:\s*rapid-site-builder-app\s*$/m);
+});
+
+// ── APP-STAGING (card rQunsPko) ─────────────────────────────────────────────
+
+/**
+ * Slice one job out of a workflow. deploy.yml now runs two tiers, and asserting
+ * "the file contains X" cannot tell you WHICH tier X belongs to — the same
+ * per-file-vs-per-invocation trap that let a scheduler guard pass on a script
+ * whose update branch was missing the flag its create branch had.
+ */
+function jobBlock(src, jobId) {
+  const start = src.indexOf(`\n  ${jobId}:\n`);
+  assert.ok(start >= 0, `deploy.yml has no job "${jobId}"`);
+  const rest = src.slice(start + 1);
+  // The next line at exactly two-space indent that is not a comment ends the job.
+  const next = rest.slice(1).search(/\n {2}[A-Za-z0-9_-]+:\n/);
+  const block = next === -1 ? rest : rest.slice(0, next + 1);
+  // Vacuity floor: a slicer that silently returns almost nothing makes every
+  // assertion below pass on an empty string.
+  assert.ok(block.length > 400, `the "${jobId}" block sliced to ${block.length} chars — the slicer is broken, not the workflow`);
+  return block;
+}
+
+const APP_STAGING_ENV_KEYS = [
+  'AGENT_ENGINE_RESOURCE',
+  'ALLOWED_ORIGINS',
+  'FIREBASE_API_KEY',
+  'FIREBASE_AUTH_DOMAIN',
+  'FIREBASE_PROJECT_ID',
+  'IMAGE_MODEL',
+  'IMAGE_PROJECT',
+  'IMAGE_REGION',
+  'PUBLIC_BASE_URL',
+  'PUBLIC_MEDIA_BASE_URL',
+  'PUBLISHED_SITES_BUCKET',
+  'SITE_IMAGES_BUCKET',
+  'USER_UPLOADS_BUCKET',
+  'WARM_KEY',
+];
+
+test('the single --set-env-vars in deploy.yml belongs to the RETIRED tier, not APP-STAGING', () => {
+  // The pinned-list test above matches the FIRST --set-env-vars in the file. That
+  // is correct only while there is exactly one and it is the retired tier's.
+  // Without this, giving APP-STAGING a --set-env-vars would either be silently
+  // attributed to the retired tier or fail with a confusing message about a
+  // list that was never edited.
+  const src = read(STAGING_WF);
+  const retired = jobBlock(src, 'deploy-staging');
+  const appStaging = jobBlock(src, 'deploy-app-staging');
+
+  assert.match(retired, /--set-env-vars\s+"/, 'the retired tier lost its --set-env-vars line');
+  assert.doesNotMatch(
+    appStaging,
+    /--set-env-vars\s+"/,
+    'APP-STAGING must MERGE (--update-env-vars), never REPLACE. It shares a Cloud ' +
+      'Run service with keys edited operationally; --set-env-vars would delete them ' +
+      'on the next push to main (rule #20 — it already bit PROD once).',
+  );
+});
+
+test('APP-STAGING names every env key it needs, and auth cannot silently switch off', () => {
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+  assert.deepEqual(
+    envKeysOf(block, 'update-env-vars'),
+    [...APP_STAGING_ENV_KEYS].sort(),
+    'the APP-STAGING --update-env-vars list changed. The three that flip auth on ' +
+      '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --set-secrets) ' +
+      'are load-bearing: lib/auth.js computes AUTH_ENABLED from exactly those, so ' +
+      'dropping one stands up an UNGATED tier whose deploy still reports success.',
+  );
+});
+
+test('APP-STAGING takes SESSION_SECRET from Secret Manager, never as an env literal', () => {
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+  assert.match(
+    block,
+    /--set-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
+    'APP-STAGING must bind SESSION_SECRET via --set-secrets.',
+  );
+  assert.doesNotMatch(
+    block,
+    /\|SESSION_SECRET=/,
+    'SESSION_SECRET must never appear in the --update-env-vars list — that would ' +
+      'put the session-signing key in the workflow file and in `gcloud run services describe`.',
+  );
+});
+
+test('APP-STAGING never sets RETIRE_UNGATED — that flag is what makes a surface retired', () => {
+  // The one-token failure the retired tier's own comment warns about, arriving
+  // from the other direction: setting it HERE produces a "QA tier" that 410s the
+  // engine and 301s every page, i.e. one that cannot exercise anything it exists
+  // to test, with every check in this workflow still green.
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+  assert.doesNotMatch(block, /RETIRE_UNGATED=/, 'APP-STAGING must not set RETIRE_UNGATED');
+});
+
+test('APP-STAGING holds no warm instance, and promotes traffic', () => {
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+  assert.match(block, /--min-instances 0\b/, 'a QA tier must not pay for a warm instance (PROD uses 1)');
+  // Standing Cloud Run trap: `deploy` does not move traffic when a revision pin
+  // exists, so a service can accumulate Ready revisions that never serve while
+  // every deploy reports green. Both sibling tiers promote explicitly; so must this.
+  assert.match(
+    block,
+    /gcloud run services update-traffic "\$STG_SERVICE" --to-latest/,
+    'APP-STAGING must promote traffic explicitly after deploy',
+  );
+});
+
+test('the THREE tiers stay distinguishable — each targets its own service + site', () => {
+  const src = read(STAGING_WF);
+  const retired = jobBlock(src, 'deploy-staging');
+  const appStaging = jobBlock(src, 'deploy-app-staging');
+
+  assert.match(appStaging, /STG_SERVICE:\s*rapid-builder-app-stg\s*$/m);
+  assert.match(appStaging, /STG_HOSTING_SITE:\s*rapid-builder-stg\s*$/m);
+  assert.match(appStaging, /--config=cloudbuild-staging-hosting\.yaml/);
+
+  // Each hosting deploy must be SCOPED to its own site, or one tier's Cloud
+  // Build overwrites another tier's UI with assets baked to the wrong API base.
+  assert.match(retired, /--config=cloudbuild-hosting\.yaml/);
+  assert.doesNotMatch(retired, /cloudbuild-staging-hosting\.yaml/);
+
+  const cfg = fs.readFileSync(path.join(__dirname, '..', 'cloudbuild-staging-hosting.yaml'), 'utf8');
+  assert.match(cfg, /--only hosting:rapid-builder-stg\b/, 'the APP-STAGING hosting deploy must be scoped to its own site');
+  assert.doesNotMatch(
+    cfg,
+    /--only hosting\s*\\?\s*\n?\s*--project/,
+    'an unscoped `--only hosting` here would redeploy PROD and the retired sites too',
+  );
+  assert.match(cfg, /hosting:sites:create rapid-builder-stg/, 'the site must be created idempotently in-workflow');
 });

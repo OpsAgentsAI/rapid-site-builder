@@ -55,6 +55,14 @@ const RETIRED_SITES = ['rapid-site-builder', 'rapid-site-builder-he'];
 const PROD_SITE = 'rapid-site-builder-app';
 
 /**
+ * The QA tier stood up by card rQunsPko. It exists precisely BECAUSE the sites
+ * above are retired: authenticated flows had nowhere to be exercised except
+ * PROD. It must therefore inherit none of the retirement.
+ */
+const APP_STAGING_SITE = 'rapid-builder-stg';
+const APP_STAGING_SERVICE = 'rapid-builder-app-stg';
+
+/**
  * Paths retired by KjHpbn3J, and the static file each would fall through to if
  * its redirect were removed. Kept in step with `server.js`'s RETIRE_UNGATED
  * block and with `retire.test.js`.
@@ -144,5 +152,53 @@ test('the two retirement layers name the same paths', () => {
       `server.js's RETIRE_UNGATED block no longer mentions ${p}, but ` +
         `firebase.json still retires it. The layers have drifted.`,
     );
+  }
+});
+
+test('the APP-STAGING tier inherits NO part of the retirement', () => {
+  // The failure this exists for is a copy-paste, not a misunderstanding: the
+  // three retired/prod blocks sit immediately above this one in firebase.json,
+  // and two of the three carry a `redirects` array. A block copied from the
+  // wrong neighbour produces a "staging tier" whose every human-facing path
+  // 301s to PROD — which is the exact symptom that made card rQunsPko read, for
+  // three consecutive ticks, as though the retirement were the bug.
+  const cfg = siteConfig(APP_STAGING_SITE);
+
+  assert.deepStrictEqual(
+    cfg.redirects ?? [],
+    [],
+    `${APP_STAGING_SITE} must carry NO redirects. It is the QA surface for the ` +
+      `real app; a redirect here sends QA to PROD and the tier tests nothing.`,
+  );
+
+  // Static content beats the "**" rewrite on Hosting, so `/` is served from
+  // web/index.html. That is correct HERE and is the whole difference from the
+  // retired sites — assert the file is actually present, or `/` 404s and the
+  // deploy smoke test is the first thing to find out.
+  const index = path.join(ROOT, cfg.public, 'index.html');
+  assert.ok(
+    fs.existsSync(index),
+    `${APP_STAGING_SITE} serves ${cfg.public}/ statically, but ${cfg.public}/index.html ` +
+      `does not exist — "/" would 404.`,
+  );
+
+  // And it must point at its OWN Cloud Run service. Pointing it at
+  // rapid-builder-proxy would silently make the QA tier the retired app.
+  const rw = (cfg.rewrites ?? []).find((r) => r.source === '**');
+  assert.ok(rw && rw.run, `${APP_STAGING_SITE} needs a "**" rewrite to Cloud Run`);
+  assert.strictEqual(
+    rw.run.serviceId, APP_STAGING_SERVICE,
+    `${APP_STAGING_SITE} must rewrite to ${APP_STAGING_SERVICE}, not ${rw.run.serviceId}.`,
+  );
+  assert.strictEqual(rw.run.region, 'us-central1');
+});
+
+test('the retired sites and the QA tier are four distinct sites', () => {
+  // A vacuity floor for both files: if firebase.json were emptied or a site
+  // renamed, every "site X must not do Y" assertion above would pass on nothing.
+  const names = hosting.map((h) => h.site);
+  assert.strictEqual(new Set(names).size, names.length, `duplicate site blocks in firebase.json: ${names}`);
+  for (const s of [...RETIRED_SITES, PROD_SITE, APP_STAGING_SITE]) {
+    assert.ok(names.includes(s), `firebase.json no longer configures ${s} (has: ${names.join(', ')})`);
   }
 });
