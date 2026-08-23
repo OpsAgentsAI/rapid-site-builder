@@ -1,0 +1,41 @@
+# Hosting-only deploy from INSIDE GCP via Cloud Build — the WIF-on-runner workaround.
+#
+# firebase-tools (Node google-auth) cannot consume the WIF external_account credential
+# on a GitHub-hosted runner ("Failed to authenticate, have you run firebase login?")
+# DETERMINISTICALLY. Inside Cloud Build the CLI authenticates via the metadata server
+# (native ADC as the build SA gha-deployer@opsagent-staging, firebase.admin), so the
+# failure class disappears.
+#
+# ── WHICH TIER (card rQunsPko) ──────────────────────────────────────────────
+# This is the **APP-STAGING** tier: rapid-builder-app-stg + rapid-builder-stg.
+# It is the QA surface for the real, auth-ON app. It is NOT:
+#   • cloudbuild-hosting.yaml         -> rapid-site-builder + -he, the RETIRED hackathon surface
+#   • cloudbuild-realapp-hosting.yaml -> rapid-site-builder-app, PROD
+#
+# SCOPED to rapid-builder-stg ONLY, for the same reason the other two are scoped:
+# firebase.json carries all four sites, and an unscoped `--only hosting` here would
+# overwrite PROD's UI (and the retired sites') with assets baked to THIS tier's
+# Cloud Run URL. The scoping is the guardrail, not a tidiness preference.
+steps:
+  - name: 'node:22'
+    id: deploy-staging-app-hosting
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        # Creating the site is idempotent and also AUTO-AUTHORIZES the domain for
+        # Google sign-in (Identity Platform) — which this tier needs and the
+        # retired surfaces do not. Same call, same flags as
+        # cloudbuild-realapp-hosting.yaml.
+        echo "== create Hosting site if missing (idempotent) =="
+        npx -y firebase-tools@15.21.0 hosting:sites:create rapid-builder-stg \
+          --project opsagent-staging 2>/dev/null || echo "site rapid-builder-stg already exists — continuing"
+        echo "== Firebase hosting deploy (rapid-builder-stg ONLY) =="
+        npx -y firebase-tools@15.21.0 deploy \
+          --only hosting:rapid-builder-stg \
+          --project opsagent-staging --non-interactive
+# CLOUD_LOGGING_ONLY is required when a build runs as a user-managed --service-account.
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 600s

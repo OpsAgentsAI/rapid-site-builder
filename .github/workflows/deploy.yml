@@ -1,21 +1,31 @@
 name: Deploy STAGING (auto on main)
 
-# ── TIER MAP — read this before editing either deploy workflow (card g0pH1JZX) ──
+# ── TIER MAP — read this before editing either deploy workflow (cards g0pH1JZX, rQunsPko) ──
 #
-# | tier    | Cloud Run            | Hosting site            | trigger                    |
-# |---------|----------------------|-------------------------|----------------------------|
-# | STAGING | rapid-builder-proxy  | rapid-site-builder      | push:main — THIS FILE      |
-# | PROD    | rapid-builder-app    | rapid-site-builder-app  | workflow_dispatch —        |
-# |         |                      |                         | .github/workflows/deploy-realapp.yml |
+# | tier        | Cloud Run              | Hosting site            | trigger                    | auth |
+# |-------------|------------------------|-------------------------|----------------------------|------|
+# | RETIRED     | rapid-builder-proxy    | rapid-site-builder      | push:main — THIS FILE      | OFF  |
+# |             |                        | + rapid-site-builder-he |                            |      |
+# | APP-STAGING | rapid-builder-app-stg  | rapid-builder-stg       | push:main — THIS FILE      | ON   |
+# | PROD        | rapid-builder-app      | rapid-site-builder-app  | workflow_dispatch —        | ON   |
+# |             |                        |                         | .github/workflows/deploy-realapp.yml |
+#
+# ⚠️ THE `rapid-builder-proxy` ROW IS THE **RETIRED HACKATHON SURFACE, NOT A QA
+# TIER.** Card KjHpbn3J retired it on purpose: every interactive route on it is
+# 410/301 and it is auth-OFF by Michal's 2026-06-16 guardrail. Until card
+# rQunsPko there was no staging tier of the app at all, and this file's own
+# header called the retired row "STAGING" — which is what sent three consecutive
+# readers toward un-retiring it. QA the app on **APP-STAGING**. Never here.
 #
 # A prod dispatch deploys whatever REF it is dispatched on — that workflow's own
 # header records `real-app` as its historical branch. Check the ref you pick; it
 # is not implied by the workflow.
 #
-# 🚨 THE NAMES READ BACKWARDS. The site called `rapid-site-builder` is STAGING;
-# `rapid-site-builder-app` is PROD. Anyone skimming will "fix" this the wrong way
-# round. Say which TIER you mean in every comment you add here, never just the
-# site name.
+# 🚨 THE NAMES READ BACKWARDS. `rapid-site-builder` is the RETIRED surface;
+# `rapid-site-builder-app` is PROD; the new QA tier is `rapid-builder-stg`,
+# deliberately NOT `rapid-site-builder-stg`, so it stays clear of that family.
+# Anyone skimming will "fix" this the wrong way round. Say which TIER you mean in
+# every comment you add here, never just the site name.
 #
 # `builder.opsagents.agency` is bound to the PROD site (rapid-site-builder-app).
 # It served 2026-08-17 bytes for four days because every merge deployed green to
@@ -46,10 +56,11 @@ env:
   HOSTING_SITE: rapid-site-builder
 
 jobs:
-  # STAGING tier. Functionally unchanged by card g0pH1JZX — only named for what
-  # it has always been, so the next reader is not misled by the site name.
+  # RETIRED-hackathon tier. Functionally unchanged by cards g0pH1JZX and
+  # rQunsPko — only named for what it is, so the next reader is not misled into
+  # treating it as the QA surface. The QA surface is deploy-app-staging below.
   deploy-staging:
-    name: Deploy STAGING (rapid-builder-proxy + rapid-site-builder)
+    name: Deploy RETIRED hackathon surface (rapid-builder-proxy + rapid-site-builder)
     runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
@@ -174,3 +185,125 @@ jobs:
           done
           [ "$fail" -eq 0 ]
           echo "✅ both retired surfaces: engine 410, launch links 301, /sites/** still served."
+
+  # ── APP-STAGING tier (card rQunsPko) ────────────────────────────────────────
+  # The QA surface for the REAL, auth-ON app. Until this job existed there was
+  # none: `gcloud run services list` in opsagent-staging returned exactly
+  # rapid-builder-app (PROD) and rapid-builder-proxy (RETIRED), and
+  # `firebase hosting:sites:list` exactly the three rapid-site-builder* sites.
+  # Authenticated flows had nowhere to be QA'd except PROD.
+  #
+  # A SEPARATE JOB, deliberately, not extra steps on the job above: each job gets
+  # its own checkout, so the `sed` that bakes the Cloud Run URL into web/ cannot
+  # collide with the retired tier's bake of a different URL into the same files.
+  #
+  # 🚫 This job must NEVER set RETIRE_UNGATED. That flag is what turns the app
+  # into the retired surface (410 on the engine, 301 on the pages) — setting it
+  # here would produce a "staging tier" that cannot exercise a single thing it
+  # exists to QA, while every check in this workflow stayed green.
+  deploy-app-staging:
+    name: Deploy APP-STAGING (rapid-builder-app-stg + rapid-builder-stg)
+    runs-on: ubuntu-latest
+    env:
+      # Deliberately NOT named SERVICE / HOSTING_SITE: those are the workflow-level
+      # names for the RETIRED tier, and two same-named values in one file is how a
+      # reader (or a grep-based guard) attributes a line to the wrong tier.
+      STG_SERVICE: rapid-builder-app-stg
+      STG_HOSTING_SITE: rapid-builder-stg
+      STG_APP_URL: https://rapid-builder-stg.web.app
+    steps:
+      # checkout MUST precede auth: checkout(clean:true) would wipe the
+      # gha-creds-*.json that auth writes into the workspace.
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Cloud Run — APP-STAGING (auth ON)
+        run: |
+          # ⚠️ --update-env-vars, NOT --set-env-vars (rule #20). The retired tier
+          # above uses --set-env-vars because it owns its full env set and pins it
+          # in test/deploy-env-contract.test.js. This tier MERGES, matching PROD:
+          # a key edited operationally on the service (PAID_TIER_UIDS is the one
+          # that already bit PROD) must not be deleted by the next push to main.
+          #
+          # The ^|^ delimiter is required even though ALLOWED_ORIGINS carries a
+          # single origin today: under the default comma delimiter the moment a
+          # second origin is added gcloud reads it as more env-var pairs and fails
+          # "Bad syntax for dict arg". Same reason both sibling deploys use it.
+          #
+          # SESSION_SECRET comes from Secret Manager via --set-secrets, never an
+          # env literal. Verified 2026-08-23: rapid-builder-session-secret grants
+          # roles/secretmanager.secretAccessor to exactly
+          # rapid-builder-proxy@opsagent-staging, which is the SA PROD already
+          # runs as — so RUN_SERVICE_ACCOUNT can read it on the first deploy.
+          #
+          # --min-instances 0: PROD holds a warm instance; a QA tier must not.
+          #
+          # ⚠️ NEVER put a comment BETWEEN two backslash-continued lines — bash
+          # splices `\`+newline before word-splitting, so the `#` opens a comment
+          # whose own newline ENDS the command (card rFZrx6fL).
+          gcloud run deploy "$STG_SERVICE" \
+            --source . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
+            --update-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://rapid-builder-stg.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-builder-stg.web.app" \
+            --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
+            --quiet
+          # deploy does not promote traffic when a pin exists — promote explicitly
+          gcloud run services update-traffic "$STG_SERVICE" --to-latest \
+            --project "$PROJECT_ID" --region "$REGION" --quiet
+
+      - name: Smoke test Cloud Run — APP-STAGING (expect auth ON)
+        run: |
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          echo "Service URL: $URL"
+          curl -sf "$URL/api/health" | tee /tmp/health-stg.json
+          grep -q '"agentEngine":true' /tmp/health-stg.json
+          # FAIL-CLOSED. lib/auth.js: AUTH_ENABLED = FIREBASE_PROJECT_ID &&
+          # FIREBASE_API_KEY && SESSION_SECRET. A deploy that silently lost any
+          # one of the three would otherwise stand up an ungated "QA" tier and
+          # report success — the exact shape this card's board keeps producing.
+          grep -q '"auth":true' /tmp/health-stg.json
+
+      - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
+        run: |
+          # Bake this tier's OWN Cloud Run URL into the static pages before the
+          # submit. Long SSE builds bypass the Hosting proxy's 60s cap.
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
+          # firebase-tools cannot consume the WIF external_account credential on a
+          # GitHub runner; gcloud can, so gcloud submits a Cloud Build that runs
+          # the hosting deploy inside GCP on metadata ADC. The config is SCOPED to
+          # rapid-builder-stg, so the retired sites and PROD stay untouched.
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-staging-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+
+      # Asserted from the OUTSIDE, against the live host — not against the Cloud
+      # Run URL, and not by grepping this file. The whole point of the tier is
+      # what a human QA'ing it will actually hit.
+      - name: Smoke test Hosting — APP-STAGING serves the real app, signed-in-capable
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -sf "$STG_APP_URL/api/health" | tee /tmp/health-stg-hosting.json
+          grep -q '"agentEngine":true' /tmp/health-stg-hosting.json
+          grep -q '"auth":true' /tmp/health-stg-hosting.json
+          # `/` must serve the app: 200, never a 301 (that would mean this tier
+          # inherited the retirement redirects) and never a 404 (that would mean
+          # the static bundle did not ship).
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$STG_APP_URL/")
+          if [ "$code" != "200" ]; then
+            echo "::error::$STG_APP_URL/ answered $code, expected 200 serving the real app. A 301 means this tier picked up the KjHpbn3J retirement redirects; a 404 means web/ did not deploy."
+            exit 1
+          fi
+          echo "✅ APP-STAGING: auth ON, engine reachable, / serves the app."
