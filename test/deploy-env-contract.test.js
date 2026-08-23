@@ -329,3 +329,37 @@ test('PAIRED CONTROL: the flag assertions read the COMMAND, not the comments', (
   assert.notStrictEqual(mutated, cmd, 'the flag is not in the invocation at all');
   assert.doesNotMatch(mutated, /--min-instances 0/, 'the invocation still carries the flag after mutation — comments leaked in');
 });
+
+test('APP-STAGING fails CLOSED — both smoke steps still assert auth is on', () => {
+  // Probe P12 deleted the `"auth":true` grep from the hosting smoke step and the
+  // whole suite stayed green. Nothing here executes a workflow step, so this is
+  // an assertion that we WROTE the guard, not that it runs — weaker than the
+  // flag assertions above, and said plainly rather than dressed up. It is still
+  // worth having: without it, AC-4's fail-closed check is one silent deletion
+  // away, and the failure it exists for (a deploy that lost FIREBASE_API_KEY or
+  // SESSION_SECRET stands up an UNGATED "QA" tier and reports success) is
+  // exactly the shape this repo keeps producing.
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+
+  // Anchor on the two health payloads so a renamed file cannot make this vacuous.
+  for (const f of ['/tmp/health-stg.json', '/tmp/health-stg-hosting.json']) {
+    assert.ok(block.includes(f), `the APP-STAGING job no longer writes ${f} — this guard is now vacuous`);
+    for (const flag of ['"auth":true', '"agentEngine":true']) {
+      assert.ok(
+        block.includes(`grep -q '${flag}' ${f}`),
+        `the APP-STAGING job must assert ${flag} against ${f}. One of the two smoke ` +
+          `steps is the Cloud Run URL and the other is the live host; both matter, ` +
+          `because Hosting can serve a stale rewrite target.`,
+      );
+    }
+  }
+
+  // And `/` must be asserted 200 against the live host — a 301 there means the
+  // tier picked up the retirement redirects, which is the one outcome that would
+  // make this whole card pointless while every check stayed green.
+  assert.match(
+    block,
+    /code=\$\(curl -s -o \/dev\/null -w '%\{http_code\}'[^\n]*"\$STG_APP_URL\/"\)/,
+    'the APP-STAGING job must probe "/" on the live host and require 200',
+  );
+});
