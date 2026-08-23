@@ -142,6 +142,41 @@ test('the two tiers stay distinguishable — each targets its own service + site
 // ── APP-STAGING (card rQunsPko) ─────────────────────────────────────────────
 
 /**
+ * The `gcloud run deploy` INVOCATION inside a job, as one logical line.
+ *
+ * ⚠️ Scoping to the job is not enough, and a probe proved it on this very file:
+ * `--min-instances 1` was mutated into the deploy line and the assertion stayed
+ * GREEN, because the job's own explanatory comment contains the words
+ * `--min-instances 0`. An assertion a COMMENT can satisfy is not an assertion.
+ *
+ * Comment-stripping alone would fix that one instance. Reading the invocation
+ * fixes the class: whole `#` lines go, then the backslash continuations are
+ * joined the way bash splices them, so every flag assertion below is about the
+ * command that actually runs. The paired control at the bottom of this file
+ * proves the difference rather than asserting it.
+ */
+function runDeploy(block) {
+  const code = block
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  const at = code.indexOf('gcloud run deploy');
+  assert.ok(at >= 0, 'no `gcloud run deploy` in this job');
+  const lines = code.slice(at).split('\n');
+  const parts = [];
+  for (const line of lines) {
+    const t = line.trim();
+    parts.push(t.replace(/\\$/, ''));
+    if (!t.endsWith('\\')) break;
+  }
+  const cmd = parts.join(' ');
+  // Vacuity floor: a joiner that stops at the first line yields a `gcloud run
+  // deploy <service>` stub on which every "must not contain" assertion passes.
+  assert.ok(cmd.length > 300, `the gcloud run deploy invocation joined to ${cmd.length} chars — the joiner is broken, not the workflow`);
+  return cmd;
+}
+
+/**
  * Slice one job out of a workflow. deploy.yml now runs two tiers, and asserting
  * "the file contains X" cannot tell you WHICH tier X belongs to — the same
  * per-file-vs-per-invocation trap that let a scheduler guard pass on a script
@@ -187,9 +222,9 @@ test('the single --set-env-vars in deploy.yml belongs to the RETIRED tier, not A
   const retired = jobBlock(src, 'deploy-staging');
   const appStaging = jobBlock(src, 'deploy-app-staging');
 
-  assert.match(retired, /--set-env-vars\s+"/, 'the retired tier lost its --set-env-vars line');
+  assert.match(runDeploy(retired), /--set-env-vars\s+"/, 'the retired tier lost its --set-env-vars line');
   assert.doesNotMatch(
-    appStaging,
+    runDeploy(appStaging),
     /--set-env-vars\s+"/,
     'APP-STAGING must MERGE (--update-env-vars), never REPLACE. It shares a Cloud ' +
       'Run service with keys edited operationally; --set-env-vars would delete them ' +
@@ -200,7 +235,7 @@ test('the single --set-env-vars in deploy.yml belongs to the RETIRED tier, not A
 test('APP-STAGING names every env key it needs, and auth cannot silently switch off', () => {
   const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
   assert.deepEqual(
-    envKeysOf(block, 'update-env-vars'),
+    envKeysOf(runDeploy(block), 'update-env-vars'),
     [...APP_STAGING_ENV_KEYS].sort(),
     'the APP-STAGING --update-env-vars list changed. The three that flip auth on ' +
       '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --set-secrets) ' +
@@ -211,13 +246,14 @@ test('APP-STAGING names every env key it needs, and auth cannot silently switch 
 
 test('APP-STAGING takes SESSION_SECRET from Secret Manager, never as an env literal', () => {
   const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+  const cmd = runDeploy(block);
   assert.match(
-    block,
+    cmd,
     /--set-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
     'APP-STAGING must bind SESSION_SECRET via --set-secrets.',
   );
   assert.doesNotMatch(
-    block,
+    cmd,
     /\|SESSION_SECRET=/,
     'SESSION_SECRET must never appear in the --update-env-vars list — that would ' +
       'put the session-signing key in the workflow file and in `gcloud run services describe`.',
@@ -230,12 +266,13 @@ test('APP-STAGING never sets RETIRE_UNGATED — that flag is what makes a surfac
   // engine and 301s every page, i.e. one that cannot exercise anything it exists
   // to test, with every check in this workflow still green.
   const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
-  assert.doesNotMatch(block, /RETIRE_UNGATED=/, 'APP-STAGING must not set RETIRE_UNGATED');
+  assert.doesNotMatch(runDeploy(block), /RETIRE_UNGATED=/, 'APP-STAGING must not set RETIRE_UNGATED');
 });
 
 test('APP-STAGING holds no warm instance, and promotes traffic', () => {
   const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
-  assert.match(block, /--min-instances 0\b/, 'a QA tier must not pay for a warm instance (PROD uses 1)');
+  assert.match(runDeploy(block), /--min-instances 0\b/, 'a QA tier must not pay for a warm instance (PROD uses 1)');
+  assert.doesNotMatch(runDeploy(block), /--min-instances [1-9]/, 'APP-STAGING must not hold a warm instance');
   // Standing Cloud Run trap: `deploy` does not move traffic when a revision pin
   // exists, so a service can accumulate Ready revisions that never serve while
   // every deploy reports green. Both sibling tiers promote explicitly; so must this.
@@ -268,4 +305,27 @@ test('the THREE tiers stay distinguishable — each targets its own service + si
     'an unscoped `--only hosting` here would redeploy PROD and the retired sites too',
   );
   assert.match(cfg, /hosting:sites:create rapid-builder-stg/, 'the site must be created idempotently in-workflow');
+});
+
+test('PAIRED CONTROL: the flag assertions read the COMMAND, not the comments', () => {
+  // Probe P5 mutated `--min-instances 0` to `1` in the deploy line and the
+  // suite stayed green: the job's own comment explaining the choice contains
+  // the literal `--min-instances 0`. This pins the fix in both directions
+  // rather than trusting that it worked.
+  const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
+
+  // (a) the comment really does carry the flag text — otherwise this control
+  //     passes for the wrong reason and stops protecting anything.
+  const commentsOnly = block.split('\n').filter((l) => /^\s*#/.test(l)).join('\n');
+  assert.match(
+    commentsOnly, /--min-instances 0/,
+    'the explanatory comment no longer names the flag — this control is now vacuous; ' +
+      'either restore the comment or delete this test deliberately.',
+  );
+
+  // (b) and the invocation reader does NOT see it.
+  const cmd = runDeploy(block);
+  const mutated = cmd.replace('--min-instances 0', '--min-instances 1');
+  assert.notStrictEqual(mutated, cmd, 'the flag is not in the invocation at all');
+  assert.doesNotMatch(mutated, /--min-instances 0/, 'the invocation still carries the flag after mutation — comments leaked in');
 });
