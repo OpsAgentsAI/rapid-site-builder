@@ -135,7 +135,30 @@ test('NEGATIVE TEST: real `main` is genuinely not on the real-app line', () => {
 
 test('the guard step exists in deploy-realapp.yml', () => {
   assert.match(wf, /- name: Refuse any ref that is not on the real-app line/);
-  assert.match(wf, /realappRefGuard/, 'the step must call the tested decision, not re-implement it');
+  assert.match(
+    wf,
+    /refDeployVerdict/,
+    'the step must call the tested decision by name, not re-implement it',
+  );
+});
+
+test('the ref name is READ from the module, never re-typed into the workflow', () => {
+  // Caught by a probe against this file, not reasoned about: an earlier version
+  // asserted only /realappRefGuard/, which the `node -e` body satisfies on its
+  // own — so replacing the EXPECTED_REF lookup with a hardcoded 'real-app'
+  // stayed fully GREEN. Behaviour survived that mutation, but it plants a
+  // SECOND source of truth for the one ref this workflow may deploy, and the
+  // two only have to disagree once.
+  assert.match(wf, /require\(['"]\.\/lib\/realappRefGuard['"]\)\.EXPECTED_REF/);
+  const runBody = wf.slice(
+    wf.indexOf('- name: Refuse any ref that is not on the real-app line'),
+    wf.indexOf('google-github-actions/auth@v2'),
+  );
+  assert.doesNotMatch(
+    runBody.replace(/require\([^)]*\)\.EXPECTED_REF/g, ''),
+    /['"]real-app['"]/,
+    'the guard must not carry its own literal copy of the ref name',
+  );
 });
 
 test('the guard runs BEFORE auth and BEFORE any deploy', () => {
