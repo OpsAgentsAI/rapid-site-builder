@@ -266,6 +266,30 @@ jobs:
           [ "$fail" -eq 0 ]
           echo "✅ both retired surfaces: engine 410, launch links 301, /sites/** still served."
 
+      # ── The OTHER direction (card 6kf27M5o) ─────────────────────────────────
+      # Everything above proves the retired hosts stay retired, and that they
+      # redirect to $CANON. Nothing proved $CANON answers. It is the URL every
+      # client demo deck now closes with (Pealton section 07, Ford section 04,
+      # and the Notion PRD's canonical section spine, so every future deck too).
+      #
+      # The failure this closes is a copy-paste, not a typo: RETIRE_UNGATED=1 is
+      # one token inside the fifteen-key single-line --set-env-vars above, and
+      # rule #20 rewrites that whole line on every deploy. deploy-realapp.yml
+      # carries the same shape of line for the canonical service. Land the flag
+      # there and builder.opsagents.agency 410s its own /api/build and 301s / to
+      # CANONICAL_APP_URL — which for that service is itself.
+      #
+      # ⚠️ And nothing would have said so. The retirement middleware exempts
+      # /api/health by design, and /api/health is the ONLY thing
+      # deploy-realapp.yml asserts after its deploy. The endpoint the pipeline
+      # watches is the endpoint the retirement is written to leave alone.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify the CANONICAL surface is NOT retired
+        run: node scripts/check-canonical-live.js
+
   # ── APP-STAGING tier (card rQunsPko) ────────────────────────────────────────
   # The QA surface for the REAL, auth-ON app. Until this job existed there was
   # none: `gcloud run services list` in opsagent-staging returned exactly
