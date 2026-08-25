@@ -183,12 +183,45 @@ test('THE CARD\'S OWN SELF-CATCH: triggers are counted with comments STRIPPED', 
   assert.match(rawDeploy, /^\s*#.*deploy-realapp\.yml/m);
 });
 
-test('VACUITY: the comment stripper leaves real code intact', () => {
+test('VACUITY: the stripper removes comment lines and NOTHING else', () => {
+  // The floor under every wiring assertion in this file. It started as
+  // "still long, still has jobs: and on:" and a probe (P15) walked straight
+  // through it: a stripper mutilated to drop every line containing `#` AND
+  // every blank line left the whole suite GREEN, because nothing measured what
+  // it had removed — only that something survived. A stripper that eats code
+  // does not fail loudly; it makes every source assertion above pass on a file
+  // that is no longer the file.
   for (const f of ['deploy.yml', 'deploy-engine.yml', 'deploy-realapp.yml']) {
-    const s = readWf(f);
-    assert.ok(s.length > 500, `${f}: stripped source is implausibly short`);
-    assert.match(s, /^jobs:/m, `${f}: jobs: block was eaten by the stripper`);
-    assert.match(s, /^on:/m, `${f}: on: block was eaten by the stripper`);
+    const rawLines = fs.readFileSync(path.join(WF_DIR, f), 'utf8').split('\n');
+    const comments = rawLines.filter((l) => /^\s*#/.test(l)).length;
+    const strippedLines = readWf(f).split('\n');
+    assert.ok(comments > 0, `${f}: no comment lines — this floor would be vacuous`);
+    assert.equal(
+      strippedLines.length,
+      rawLines.length - comments,
+      `${f}: the stripper removed something other than whole-line comments`,
+    );
+    assert.match(readWf(f), /^jobs:/m, `${f}: jobs: block was eaten by the stripper`);
+    assert.match(readWf(f), /^on:/m, `${f}: on: block was eaten by the stripper`);
+  }
+});
+
+test('...and stripping is DEFENCE IN DEPTH here, not the half doing the work', () => {
+  // Measured rather than assumed, because "an assertion a COMMENT can satisfy"
+  // is this fleet's most-repeated finding and it is easy to claim the fix for
+  // it without checking. TODAY no comment in these files can satisfy any wiring
+  // assertion above: none of them carries a quoted ref name or a
+  // refDeployVerdict call. So the STRIPPER is insurance and the exact-line-count
+  // floor above is what actually holds. If this ever flips — a comment quoting
+  // the guard's own code, say — this test fails and the file stops overclaiming.
+  for (const f of ['deploy.yml', 'deploy-engine.yml', 'deploy-realapp.yml']) {
+    const commentsOnly = fs
+      .readFileSync(path.join(WF_DIR, f), 'utf8')
+      .split('\n')
+      .filter((l) => /^\s*#/.test(l))
+      .join('\n');
+    assert.doesNotMatch(commentsOnly, /refDeployVerdict/, `${f}: a comment now names the call — stripping just became load-bearing`);
+    assert.doesNotMatch(commentsOnly, /['"](main|real-app)['"]/, `${f}: a comment now quotes a ref name — stripping just became load-bearing`);
   }
 });
 
