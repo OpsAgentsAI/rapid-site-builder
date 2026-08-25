@@ -349,6 +349,30 @@ const have = (ref) =>
   spawnSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: REPO }).status === 0;
 const resolve = (name) => [`refs/remotes/origin/${name}`, name].find(have);
 
+test('CI gives the real-ref tests the history they need — or they pass on nothing', () => {
+  // Found by reading the CI log rather than the check mark. On run 32849680329
+  // the two tests below, and card LEBxGF5d's, all printed
+  //     SKIP: need both main and real-app (shallow clone?)
+  // and PASSED — `ci.yml`'s checkout was depth-1, so the runner had no
+  // `real-app` ref. Three green ticks that measured nothing, on the exact
+  // assertion both cards call the point of the exercise: "a negative test on a
+  // genuinely wrong ref, not a fixture".
+  //
+  // The SKIP itself is correct and stays — a fork or a shallow local clone must
+  // not be red for an environment reason. What must not be silent is CI sitting
+  // in it permanently. So the depth is asserted HERE, where removing it reds
+  // loudly, instead of turning the skip into a failure and crying wolf on
+  // everyone else.
+  const ci = readWf('ci.yml');
+  const testJob = ci.slice(ci.indexOf('  test:'), ci.indexOf('  workflows:'));
+  assert.ok(testJob.length > 0, 'ci.yml test job not found');
+  assert.match(
+    testJob,
+    /actions\/checkout@v4\n\s+with:\n\s+fetch-depth:\s*0/,
+    'ci.yml test job must checkout with fetch-depth: 0, or the real-ref tests below skip and pass on nothing',
+  );
+});
+
 test('NEGATIVE TEST: real `real-app` is genuinely not on the main line', () => {
   // "Prove it on a ref that is genuinely wrong, not on a synthetic one."
   // Skipped LOUDLY where the refs are absent (shallow clone, fork) — the
