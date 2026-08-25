@@ -56,11 +56,91 @@ env:
   HOSTING_SITE: rapid-site-builder
 
 jobs:
+  # ── REF GUARD (card eKfog19I) ───────────────────────────────────────────────
+  # This workflow is `push: main` AND `workflow_dispatch`. The dispatch path
+  # deployed whatever ref it was handed — including `real-app`, which would push
+  # the auth-ON product onto the RETIRED ungated surface and then
+  # `update-traffic --to-latest`. Card LEBxGF5d closed the same hole on the PROD
+  # workflow; this is the second of the three instances eKfog19I measured.
+  #
+  # ── WHY THIS IS ITS OWN JOB AND NOT A STEP IN EACH DEPLOY JOB ──────────────
+  # Two reasons, both load-bearing:
+  #
+  #  1. There are TWO deploy jobs and they run in parallel. A guard inside one
+  #     of them stops that one and lets the other deploy anyway. `needs:` makes
+  #     the ordering structural instead of positional.
+  #  2. The guard needs full history (`fetch-depth: 0`) and the deploy jobs do
+  #     not. Isolating it here keeps every push-to-main deploy on the cheap
+  #     depth-1 checkout it has always used.
+  #
+  # ⚠️ THE JOB CARRIES NO JOB-LEVEL `if:` ON PURPOSE, AND A TEST PINS THAT.
+  # A skipped job makes every job that `needs:` it skip too — so gating this job
+  # on `github.event_name == 'workflow_dispatch'` would silently stop deploying
+  # on every merge to main while the run showed no failure. The EVENT check
+  # belongs on the STEPS, where a skip is inert. This is the cry-wolf direction
+  # of the same class the guard itself is about.
+  #
+  # ⚠️ AND DO NOT "OPTIMISE" fetch-depth INTO
+  #        fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 0 || 1 }}
+  # 0 is FALSY in GitHub expressions, so that expression always evaluates to 1 —
+  # the guard would then be permanently cannot-verify and abort every dispatch,
+  # with nothing in the diff to say why. A constant 0 is correct and boring.
+  ref-guard:
+    name: Ref guard (dispatch only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a dispatch on any ref that is not on the main line
+        if: github.event_name == 'workflow_dispatch'
+        # REF_NAME goes through env:, never inline `${{ }}` in the run: body.
+        # A git branch name may legally contain `$`, backticks and parentheses,
+        # so `"${{ github.ref_name }}"` inside a double-quoted shell word is a
+        # command-substitution sink. It is only ever printed, so it is data.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy.yml'].expectedRef")
+          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
+            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
+            || true
+          # `|| rc=$?` is LOAD-BEARING, not style. GitHub runs this with `bash -e`,
+          # so a bare `--is-ancestor` returning 1 aborts the step on the spot —
+          # fail-closed, but with a generic runner error and none of the message
+          # that tells the operator which ref to use instead.
+          rc=0
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
+          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
+          RC="$rc" node -e '
+            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["deploy.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+            });
+            console.log(v.message);
+            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+          '
+
+      # The push:main path is deliberately untouched: on a merge the ref IS the
+      # expected ref, so there is nothing to decide. Saying so out loud beats a
+      # job whose log is empty on most of its runs — an empty log reads like a
+      # guard that did not run.
+      - name: push to main — ref guard not applicable
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "event=${{ github.event_name }}: this run is a push to main, which IS the ref this workflow deploys."
+          echo "The ref guard applies to workflow_dispatch only (card eKfog19I)."
+
   # RETIRED-hackathon tier. Functionally unchanged by cards g0pH1JZX and
   # rQunsPko — only named for what it is, so the next reader is not misled into
   # treating it as the QA surface. The QA surface is deploy-app-staging below.
   deploy-staging:
     name: Deploy RETIRED hackathon surface (rapid-builder-proxy + rapid-site-builder)
+    needs: ref-guard
     runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
@@ -203,6 +283,7 @@ jobs:
   # exists to QA, while every check in this workflow stayed green.
   deploy-app-staging:
     name: Deploy APP-STAGING (rapid-builder-app-stg + rapid-builder-stg)
+    needs: ref-guard
     runs-on: ubuntu-latest
     env:
       # Deliberately NOT named SERVICE / HOSTING_SITE: those are the workflow-level
