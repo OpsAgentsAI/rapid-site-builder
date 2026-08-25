@@ -24,7 +24,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # ⚠️ fetch-depth: 0 IS LOAD-BEARING, NOT A NICETY (card eKfog19I).
+      # Three tests answer the deploy-ref question against the REAL refs rather
+      # than a fixture — cards LEBxGF5d and eKfog19I both require a negative
+      # test on a genuinely wrong ref, because an assertion never shown to fire
+      # is not a guard. They skip LOUDLY (and pass) when the refs are absent, so
+      # that a fork or a shallow local clone is not red for an environment
+      # reason. Measured on run 32849680329: under the default depth-1 checkout
+      # all three printed `SKIP: need both main and real-app` and passed on
+      # nothing. The graceful skip is right; being permanently in it is not.
+      # test/deploy-ref-policy.test.js asserts this value, so removing it reds
+      # here instead of silently re-emptying those three tests.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
