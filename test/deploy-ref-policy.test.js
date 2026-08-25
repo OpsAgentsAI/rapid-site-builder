@@ -351,23 +351,43 @@ test('THE ENGINE ROW IS A MEASUREMENT: agents/ on real-app is behind main', () =
     console.log('SKIP: need both main and real-app locally (shallow clone?)');
     return;
   }
+  // ⚠️ THIS ASSERTION IS DERIVED FROM THE POLICY, NOT WRITTEN BESIDE IT — and
+  // that is the whole point. A probe (P12) flipped this row's expectedRef from
+  // `main` to `real-app` and the entire suite stayed GREEN: the drift was
+  // measured, and nothing connected the measurement to the CHOICE. Flipped, the
+  // guard would refuse `main` dispatches and ALLOW `real-app` ones — minting
+  // engines from a crew missing the Dana/Remy/Kai split, which is precisely the
+  // outcome this row exists to prevent, reached through the row itself.
+  const expected = DEPLOY_REF_POLICY['deploy-engine.yml'].expectedRef;
+  const other = expected === 'main' ? 'real-app' : 'main';
+  const expectedRefPath = resolve(expected);
+  const otherRefPath = resolve(other);
+  if (!expectedRefPath || !otherRefPath) {
+    console.log(`SKIP: need both ${expected} and ${other} locally (shallow clone?)`);
+    return;
+  }
   const out = spawnSync(
     'git',
-    ['diff', '--numstat', mainRef, appRef, '--', 'agents/', 'scripts/deploy_agent_engine.py'],
+    ['diff', '--numstat', expectedRefPath, otherRefPath, '--', 'agents/', 'scripts/deploy_agent_engine.py'],
     { cwd: REPO, encoding: 'utf8' },
   );
   assert.equal(out.status, 0, 'git diff --numstat failed');
   const rows = out.stdout.trim().split('\n').filter(Boolean);
   if (rows.length === 0) {
-    // A forward-port landed. The policy row is then merely conservative rather
-    // than load-bearing — correct, and NOT a reason to red.
-    console.log('NOTE: agents/ now agrees across main and real-app — the engine policy row is conservative, not urgent.');
+    // A forward-port landed and the branches agree on the crew. The policy row
+    // is then merely conservative rather than load-bearing — correct, and NOT a
+    // reason to red.
+    console.log(`NOTE: agents/ now agrees across ${expected} and ${other} — the engine policy row is conservative, not urgent.`);
     return;
   }
+  // additions = lines `other` has that `expected` lacks; deletions = the reverse.
+  const additions = rows.reduce((n, r) => n + Number(r.split('\t')[0] || 0), 0);
   const deletions = rows.reduce((n, r) => n + Number(r.split('\t')[1] || 0), 0);
   assert.ok(
-    deletions > 0,
-    'real-app is expected to be BEHIND main on the crew definition; if it is now AHEAD, ' +
-      'the engine policy row names the wrong ref and must be re-decided, not left to drift',
+    deletions > additions,
+    `deploy-engine.yml names "${expected}" as the ref that owns the crew definition, but ` +
+      `"${other}" is AHEAD of it there (+${additions} / -${deletions} on agents/). ` +
+      'An engine minted from the ref this policy names would be missing crew code, and its ' +
+      'RESOURCE_NAME would then be pinned into the app env. Re-decide the row deliberately.',
   );
 });
