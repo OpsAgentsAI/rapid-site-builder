@@ -1,0 +1,102 @@
+name: Divergence alarm (merged work that cannot reach PROD)
+
+# Card xe1q8uHa. `main` and `real-app` diverged for FIVE WEEKS and nothing said
+# so: CI passed on both branches, both deploy workflows succeeded, and prod
+# simply never changed. Two finished features (PRs #58, #59) sat merged and
+# unreachable. A staleness that produces no red is indistinguishable from a
+# system at rest.
+#
+# ── WHY THIS IS A SCHEDULED JOB AND *NOT* A CI TEST ─────────────────────────
+# The branches are SUPPOSED to differ — `real-app` carries 14 auth-ON commits
+# `main` deliberately lacks (Michal's 2026-06-16 guardrail). A CI assertion on
+# divergence would be red on every PR on both branches from day one, and the fix
+# a reader reaches for under a permanently-red gate is to delete the check. So
+# the merge gate is left alone; this runs on its own clock and is the only thing
+# allowed to go red about it. test/branch-divergence.test.js pins the classifier
+# and asserts NOTHING about whether the live branches agree.
+#
+# ── THE AUDIENCE, WHICH IS THE POINT ───────────────────────────────────────
+# The card's requirement was explicit: "it must fail LOUD and it must be routed
+# somewhere a human reads (this fleet ships staleness detectors nobody reads; do
+# not add another)." A red run in the Actions tab is not an audience. So this
+# also opens a GitHub issue, updates that same issue instead of opening a second
+# one, and CLOSES it when the condition clears — an alarm that cannot un-ring
+# becomes noise, and noise is how the next one gets muted.
+
+on:
+  schedule:
+    # 06:17 UTC daily — deliberately off the hour, since :00 is where every
+    # scheduled job on the platform piles up and gets delayed.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: divergence-alarm
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # LOAD-BEARING. On a shallow clone `rev-list A..B` returns nothing for
+          # the same reason a healthy repo does, and this job would report "all
+          # clear" while blind. The classifier refuses to answer without real
+          # history, but only because this line makes real history obtainable.
+          fetch-depth: 0
+
+      - name: Fetch both branches
+        run: git fetch --no-tags origin main real-app
+
+      - name: Measure unreachable work
+        id: measure
+        continue-on-error: true
+        run: node scripts/check-branch-divergence.js --source main --target real-app
+
+      - name: Open or update the alarm issue
+        if: steps.measure.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.measure.outputs.title }}
+          BODY: ${{ steps.measure.outputs.body }}
+        run: |
+          set -euo pipefail
+          marker='<!-- divergence-alarm:main-to-real-app -->'
+          printf '%s\n\n%s\n' "$BODY" "$marker" > /tmp/alarm-body.md
+          existing=$(gh issue list --state open --search "$marker in:body" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$TITLE" --body-file /tmp/alarm-body.md
+            gh issue comment "$existing" --body "Re-measured $(date -u '+%Y-%m-%d %H:%M UTC'): still unreachable. Details in the issue body."
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$TITLE" --body-file /tmp/alarm-body.md --assignee MichalOpsAgents
+          fi
+
+      - name: Close the alarm issue once it clears
+        if: steps.measure.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          marker='<!-- divergence-alarm:main-to-real-app -->'
+          existing=$(gh issue list --state open --search "$marker in:body" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Cleared $(date -u '+%Y-%m-%d %H:%M UTC'): no product commit on \`main\` is unreachable from \`real-app\`. Reopened automatically if it recurs."
+            echo "closed issue #$existing"
+          else
+            echo "no open alarm issue — nothing to close"
+          fi
+
+      - name: Fail the run if the alarm is up
+        if: steps.measure.outcome == 'failure'
+        run: |
+          echo "::error::Merged product work cannot reach real-app — see the job summary and the open alarm issue."
+          exit 1
