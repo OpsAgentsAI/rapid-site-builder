@@ -34,6 +34,11 @@ permissions:
   contents: read
   issues: write
 
+env:
+  # The alarm's issue is identified by a LABEL, never by a body search — see the
+  # comment on the "Open or update" step below for the measurement that forced it.
+  ALARM_LABEL: divergence-alarm
+
 concurrency:
   group: divergence-alarm
   cancel-in-progress: false
@@ -67,16 +72,42 @@ jobs:
           BODY: ${{ steps.measure.outputs.body }}
         run: |
           set -euo pipefail
+          # ── WHY A LABEL AND NOT A BODY SEARCH ──────────────────────────────
+          # MEASURED 2026-08-27 03:3x IDT, 8h24m after issue #70 was opened by
+          # this very workflow:
+          #     gh issue list --state open --search '<marker> in:body'  ->  []
+          #     gh issue list --state open                              ->  [#70]
+          # Same command, same token, same repo — so auth and scope were fine
+          # and GitHub's SEARCH INDEX was the gap. A control search on a word in
+          # the title returned [] too, so the issue was simply not indexed. On
+          # top of that an HTML comment is not an exact-match key: the tokeniser
+          # is free never to match it at all.
+          # Both consequences are silent and both are bad:
+          #   * this step takes the else branch and opens a DUPLICATE issue —
+          #     every single day, which is precisely the noise this design
+          #     exists to avoid, and noise is how the next alarm gets muted;
+          #   * the close step below uses the same lookup, so when the branches
+          #     DO reconcile the alarm cannot find its own issue to close. An
+          #     alarm that cannot un-ring is the failure mode named in the
+          #     header comment of this file.
+          # A label is exact, is applied at creation time, is served by the REST
+          # list endpoint rather than the search index, and has no lag.
           marker='<!-- divergence-alarm:main-to-real-app -->'
           printf '%s\n\n%s\n' "$BODY" "$marker" > /tmp/alarm-body.md
-          existing=$(gh issue list --state open --search "$marker in:body" \
+          # Idempotent: this succeeds whether or not the label already exists, so
+          # the workflow cannot fail on a fresh clone of the repo.
+          gh label create "$ALARM_LABEL" --color B60205 \
+            --description 'Opened by the main->real-app divergence alarm' \
+            >/dev/null 2>&1 || true
+          existing=$(gh issue list --state open --label "$ALARM_LABEL" \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --title "$TITLE" --body-file /tmp/alarm-body.md
             gh issue comment "$existing" --body "Re-measured $(date -u '+%Y-%m-%d %H:%M UTC'): still unreachable. Details in the issue body."
             echo "updated issue #$existing"
           else
-            gh issue create --title "$TITLE" --body-file /tmp/alarm-body.md --assignee MichalOpsAgents
+            gh issue create --title "$TITLE" --body-file /tmp/alarm-body.md \
+              --assignee MichalOpsAgents --label "$ALARM_LABEL"
           fi
 
       - name: Close the alarm issue once it clears
@@ -85,8 +116,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          marker='<!-- divergence-alarm:main-to-real-app -->'
-          existing=$(gh issue list --state open --search "$marker in:body" \
+          # Same lookup as the open step, and for the same measured reason: a
+          # body search could not find the issue this workflow had itself just
+          # created, which would leave the alarm permanently un-closable.
+          existing=$(gh issue list --state open --label "$ALARM_LABEL" \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue close "$existing" --comment "Cleared $(date -u '+%Y-%m-%d %H:%M UTC'): no product commit on \`main\` is unreachable from \`real-app\`. Reopened automatically if it recurs."
