@@ -113,12 +113,19 @@ test('UNKNOWN does not exit 0 — a check that cannot answer must not answer hea
 test('WIRED: the workflow stamps liveness on EVERY path, not only when diverged', () => {
   // The all-clear path is the one that wrote nothing; an `if:`-guarded stamp
   // would re-open exactly the hole this card is about.
-  // Anchor to END OF LINE and assert it is UNIQUE before slicing on it.
-  // Found by probe P2: /name:\s*Stamp liveness/ is a SUBSTRING match, so a step
-  // called "Stamp liveness notes" satisfies it — and if such a step sat above
-  // the real one, the slice below would read the wrong step's `if:` and report
-  // a conditional stamp as unconditional. The behaviour survives a rename; the
-  // ASSERTION is what does not survive a near-duplicate.
+  // Anchor to END OF LINE and assert the step name is UNIQUE.
+  // Found by probe P2: the first version, /name:\s*Stamp liveness/, is a
+  // SUBSTRING match — a step renamed "Stamp liveness_DISABLED_PROBE" satisfied
+  // it and the probe read GREEN. A rename is harmless (the step still runs);
+  // a NEAR-DUPLICATE is not, because the slice below starts at the first hit.
+  //
+  // ⚠️ THE COUNT IS THE HALF THAT IS PROVEN. I also tried replacing the
+  // indexOf lookup with a match-position slice and could NOT construct a case
+  // where it changes the verdict — probe P7 planted a decoy step above the real
+  // one and both forms agreed; a padded decoy reddened both equally. So that
+  // refinement is NOT claimed here, and the assertion is left as the count plus
+  // the deletion case, which is what the probes actually demonstrate:
+  // removing the whole Stamp liveness step block reds 2 (P2, run faithfully).
   const anchors = wf.match(/^\s*- name: Stamp liveness\s*$/gm) || [];
   assert.equal(anchors.length, 1, `expected exactly one "Stamp liveness" step, found ${anchors.length}`);
   const stamp = wf.slice(wf.indexOf('- name: Stamp liveness'));
