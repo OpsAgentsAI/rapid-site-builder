@@ -40,10 +40,46 @@
 // This module holds the decisions so they are unit-testable; the workflow only
 // moves strings. Same split as check-branch-divergence.js / branch-divergence.test.js.
 
-// The card's threshold. A daily cron plus GitHub's documented delay under load
-// (the one observed schedule fire landed 11h19m after its 06:17Z window) means
-// anything at or under ~24h+slack is normal; 36h is one full window missed.
-const MISSED_WINDOW_HOURS = 36;
+// The threshold must sit STRICTLY BETWEEN the worst legitimate gap and the
+// smallest real skip. Card oPbduwRM — 36h did not, and the margin was 41 minutes.
+//
+// A daily cron does NOT produce 24h gaps. Two legitimate consecutive runs are
+// `24h + (delay_2 - delay_1)`, where each delay is GitHub's queue delay for that
+// window. This repo has MEASURED an 11h19m delay: run 33099305021, scheduled
+// 06:17Z, started 2026-08-27T17:36:55Z. So:
+//
+//     run N    on time      06:17Z day 1
+//     run N+1  11h19m late  17:36Z day 2
+//     gap                   35h19m     <- legitimate, and 36h cleared it by 41 min
+//
+// A delay ~41 minutes worse than one this repo has already produced would have
+// made the detector red with no window actually missed. This file's own header
+// says noise is how the next alarm gets muted, and a guard that cries wolf about
+// ITSELF is the fastest version of that.
+//
+// Raising it to 48h is the other failure: a genuinely skipped window lands at
+// ~48h (24h gap + 24h skipped), so 48 would classify a real skip as FRESH and
+// delete the detection this check exists for. The usable band is:
+//
+//     worst legitimate gap seen   ~35h19m
+//       ...usable band...
+//     smallest true skip          ~48h  (minus the next run's own delay)
+//
+// 40h takes ~4h40m of headroom over the measured worst case while staying ~8h
+// below a true skip.
+//
+// ⚠️ THE BAND NARROWS AS DELAYS GROW, and this constant cannot be re-tuned out
+// of that. A >12h delay on the run AFTER a skipped window pushes a true skip
+// below 48h and the two populations overlap — at which point gap-vs-threshold
+// stops discriminating at all, and the detector needs the EXPECTED WINDOW TIMES
+// rather than just the previous run's timestamp. If you find yourself tuning
+// this a second time, that is the signal to change the method, not the number.
+const MISSED_WINDOW_HOURS = 40;
+
+/** The worst legitimate gap this repo has actually produced, in hours. Evidence for the band above. */
+const MEASURED_WORST_LEGITIMATE_GAP_HOURS = 35 + 19 / 60;
+/** A genuinely skipped daily window: one 24h gap plus the 24h that was skipped. */
+const TRUE_SKIP_GAP_HOURS = 48;
 
 /**
  * The liveness stamp. The EVENT NAME IS MANDATORY and is why this is not just a
@@ -112,4 +148,11 @@ function exitCodeFor(status) {
   throw new Error(`exitCodeFor: unknown status ${JSON.stringify(status)}`);
 }
 
-module.exports = { heartbeatLine, classifyRunGap, exitCodeFor, MISSED_WINDOW_HOURS };
+module.exports = {
+  heartbeatLine,
+  classifyRunGap,
+  exitCodeFor,
+  MISSED_WINDOW_HOURS,
+  MEASURED_WORST_LEGITIMATE_GAP_HOURS,
+  TRUE_SKIP_GAP_HOURS,
+};

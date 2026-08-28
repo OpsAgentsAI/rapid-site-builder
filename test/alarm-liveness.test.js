@@ -11,7 +11,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { heartbeatLine, classifyRunGap, exitCodeFor, MISSED_WINDOW_HOURS } =
+const {
+  heartbeatLine,
+  classifyRunGap,
+  exitCodeFor,
+  MISSED_WINDOW_HOURS,
+  MEASURED_WORST_LEGITIMATE_GAP_HOURS,
+  TRUE_SKIP_GAP_HOURS,
+} =
   require('../scripts/alarm-liveness.js');
 
 const WF = path.join(__dirname, '..', '.github', 'workflows', 'divergence-alarm.yml');
@@ -96,9 +103,49 @@ test('the threshold is a real boundary in BOTH directions', () => {
   const over = new Date(base - (MISSED_WINDOW_HOURS + 1) * 3_600_000).toISOString();
   assert.equal(classifyRunGap({ previousRunISO: under, nowISO: NOW }).status, 'FRESH');
   assert.equal(classifyRunGap({ previousRunISO: over, nowISO: NOW }).status, 'MISSED_WINDOW');
-  // 36 is the CARD's number, not an implementation detail — pinned as a literal
-  // so a future edit to the constant cannot move the assertion with it.
-  assert.equal(MISSED_WINDOW_HOURS, 36);
+  // 40 is the CARD's number (oPbduwRM), not an implementation detail — pinned as
+  // a literal so a future edit to the constant cannot move the assertion with it.
+  assert.equal(MISSED_WINDOW_HOURS, 40);
+});
+
+// ── Card oPbduwRM: BOTH EDGES OF THE BAND, pinned ──────────────────────────
+// The threshold has two ways to be wrong and they pull in opposite directions.
+// A test on only one side lets the next tune silently destroy the other, which
+// is why these are two assertions and not one.
+
+test('EDGE 1 — the worst LEGITIMATE gap this repo has produced (35h19m) is FRESH', () => {
+  // Derived, not guessed: run 33099305021 was scheduled 06:17Z and started
+  // 2026-08-27T17:36:55Z, an 11h19m queue delay. An on-time run followed by one
+  // that late is 24h + 11h19m apart with NO window missed. Under the old 36h
+  // threshold this cleared by 41 minutes — a delay barely worse than one already
+  // observed would have reddened a healthy alarm.
+  const base = Date.parse(NOW);
+  const worstLegit = new Date(base - MEASURED_WORST_LEGITIMATE_GAP_HOURS * 3_600_000).toISOString();
+  const r = classifyRunGap({ previousRunISO: worstLegit, nowISO: NOW });
+  assert.equal(r.status, 'FRESH', `a ${r.gapHours}h legitimate gap must not read as a missed window`);
+  assert.ok(MISSED_WINDOW_HOURS > MEASURED_WORST_LEGITIMATE_GAP_HOURS,
+    'the threshold must sit ABOVE the worst legitimate gap, or the alarm cries wolf about itself');
+});
+
+test('EDGE 2 — a genuinely skipped window (48h) is still MISSED_WINDOW', () => {
+  // The opposite failure: raising the threshold to clear the delay above would
+  // delete the detection. 48h is one 24h gap plus the 24h that was skipped.
+  const base = Date.parse(NOW);
+  const trueSkip = new Date(base - TRUE_SKIP_GAP_HOURS * 3_600_000).toISOString();
+  assert.equal(classifyRunGap({ previousRunISO: trueSkip, nowISO: NOW }).status, 'MISSED_WINDOW');
+  assert.ok(MISSED_WINDOW_HOURS < TRUE_SKIP_GAP_HOURS,
+    'the threshold must sit BELOW a true skip, or a real missed window reads as healthy');
+});
+
+test('the band is non-empty and the threshold is INSIDE it — not merely a number', () => {
+  // A vacuity guard on the two edges above: if the constants ever cross, both
+  // edge tests could be satisfied by a threshold that discriminates nothing.
+  assert.ok(MEASURED_WORST_LEGITIMATE_GAP_HOURS < TRUE_SKIP_GAP_HOURS, 'the band has collapsed');
+  assert.ok(
+    MISSED_WINDOW_HOURS > MEASURED_WORST_LEGITIMATE_GAP_HOURS && MISSED_WINDOW_HOURS < TRUE_SKIP_GAP_HOURS,
+    `threshold ${MISSED_WINDOW_HOURS}h is outside the usable band ` +
+      `(${MEASURED_WORST_LEGITIMATE_GAP_HOURS}h .. ${TRUE_SKIP_GAP_HOURS}h)`,
+  );
 });
 
 test('UNKNOWN does not exit 0 — a check that cannot answer must not answer healthy', () => {
