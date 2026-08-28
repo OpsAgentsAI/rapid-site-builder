@@ -178,3 +178,40 @@ test('WIRED: the gap step cannot suppress the divergence measurement', () => {
   // …and it must run BEFORE the measurement, or "previous run" includes this one.
   assert.ok(wf.indexOf('name: Detect a missed window') < wf.indexOf('name: Measure unreachable work'));
 });
+
+// ── the permission the gap step cannot run without ─────────────────────────
+// Card oWtnNDT5, second pass. Every test above this line passed on the commit
+// that shipped #72, and the gap step STILL could not run: the unit tests feed
+// classifyRunGap() a synthetic timestamp, so they exercise the classifier and
+// say nothing about whether the workflow can obtain a real one. Measured on
+// run 33152268617 — `gh: Resource not accessible by integration (HTTP 403)`,
+// because `permissions:` granted contents+issues and the step reads
+// `/actions/workflows/.../runs`, which on a private repo needs `actions`.
+//
+// The gap between "the logic is right" and "the caller can feed it" is where
+// this repo keeps losing guards, so the permission is pinned here rather than
+// left to review.
+test('WIRED: the token can actually READ the run history the gap step depends on', () => {
+  const idx = wf.indexOf('permissions:');
+  assert.ok(idx > -1, 'the workflow declares no permissions block');
+  const perms = wf.slice(idx, wf.indexOf('env:', idx));
+  assert.match(perms, /actions:\s*read/,
+    'permissions: is missing `actions: read` — the "Detect a missed window" step 403s on ' +
+    'GET /actions/workflows/.../runs and reports UNKNOWN on every run, reddening the alarm ' +
+    'for a reason unrelated to divergence (measured: run 33152268617)');
+  // The step this permission exists for must still be the one making the call.
+  const gapStep = wf.slice(wf.indexOf('name: Detect a missed window'),
+                           wf.indexOf('name: Measure unreachable work'));
+  assert.match(gapStep, /actions\/workflows\/divergence-alarm\.yml\/runs/,
+    'the gap step no longer reads the run history — this permission is then unexplained');
+});
+
+test('CONTROL: the actions:read assertion is not satisfied by its own comment', () => {
+  // The comment block above `actions: read` in the workflow says the words
+  // "actions: read" out loud. Asserting on the RAW source would therefore pass
+  // even if the permission itself were deleted. Prove the strip does its job.
+  assert.ok(/^\s*#.*actions: read/m.test(wfSrc),
+    'expected the workflow to carry a commented mention of actions: read to strip');
+  assert.ok(!/^\s*#.*actions: read/m.test(wf),
+    'stripYamlComments left a commented mention in place — every assertion on `wf` is suspect');
+});
