@@ -59,6 +59,39 @@ jobs:
       - name: Fetch both branches
         run: git fetch --no-tags origin main real-app
 
+      - name: Detect a missed window
+        # Card oWtnNDT5. The alarm reads its OWN run history and reds if it
+        # skipped a window. This is deliberately NOT a second scheduled
+        # workflow: a stale-checker on the same clock shares the failure mode of
+        # the thing it checks and is worthless (the card says so explicitly).
+        #
+        # ⚠️ HONEST SCOPE, so nobody over-reads a green here: this catches an
+        # alarm that is SKIPPING, which is the failure actually observed on this
+        # repo (first window skipped; the second delivered 11h19m late). It
+        # CANNOT catch an alarm that is completely dead, because a run that
+        # never happens runs no check. The dead case is closed by the stamp
+        # below being READABLE from the issue page, not by this going red.
+        id: gap
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # per_page=2: [0] is THIS run, [1] is the previous one. Empty on the
+          # very first run, which classifyRunGap reports as FIRST_RUN rather
+          # than as a fault -- a guard that is red on day one gets deleted.
+          prev=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=2" \
+                   --jq '.workflow_runs[1].created_at // empty' || echo '')
+          node -e '
+            const { classifyRunGap, exitCodeFor } = require("./scripts/alarm-liveness.js");
+            const r = classifyRunGap({ previousRunISO: process.argv[1] || null, nowISO: new Date().toISOString() });
+            const gap = r.gapHours === null ? "n/a" : r.gapHours.toFixed(1) + "h";
+            console.log("alarm gap: " + r.status + " (since previous run: " + gap + ")");
+            if (r.status === "MISSED_WINDOW") console.log("::error::The divergence alarm skipped a window — " + gap + " since its previous run.");
+            if (r.status === "UNKNOWN") console.log("::error::The divergence alarm cannot read its own last run time.");
+            process.exit(exitCodeFor(r.status));
+          ' "$prev"
+
       - name: Measure unreachable work
         id: measure
         continue-on-error: true
@@ -103,7 +136,7 @@ jobs:
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --title "$TITLE" --body-file /tmp/alarm-body.md
-            gh issue comment "$existing" --body "Re-measured $(date -u '+%Y-%m-%d %H:%M UTC'): still unreachable. Details in the issue body."
+            gh issue comment "$existing" --body "Re-measured $(date -u '+%Y-%m-%d %H:%M UTC') · trigger: ${{ github.event_name }}: still unreachable. Details in the issue body."
             echo "updated issue #$existing"
           else
             gh issue create --title "$TITLE" --body-file /tmp/alarm-body.md \
@@ -122,14 +155,70 @@ jobs:
           existing=$(gh issue list --state open --label "$ALARM_LABEL" \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue close "$existing" --comment "Cleared $(date -u '+%Y-%m-%d %H:%M UTC'): no product commit on \`main\` is unreachable from \`real-app\`. Reopened automatically if it recurs."
+            gh issue close "$existing" --comment "Cleared $(date -u '+%Y-%m-%d %H:%M UTC') · trigger: ${{ github.event_name }}: no product commit on \`main\` is unreachable from \`real-app\`. Reopened automatically if it recurs."
             echo "closed issue #$existing"
           else
             echo "no open alarm issue — nothing to close"
           fi
 
-      - name: Fail the run if the alarm is up
-        if: steps.measure.outcome == 'failure'
+      - name: Stamp liveness
+        # Card oWtnNDT5 — THE HOLE THIS CARD IS ACTUALLY ABOUT.
+        #
+        # Traced on 2026-08-28, the three reachable paths of this workflow:
+        #   diverged                     -> issue edited + "Re-measured" comment  (visible)
+        #   cleared, alarm issue open    -> issue closed + "Cleared" comment      (visible once)
+        #   cleared, no alarm issue open -> "nothing to close", exit 0            (NOTHING)
+        # The third row is the steady state once somebody fixes the divergence,
+        # i.e. exactly when everyone stops watching -- and from the issue page a
+        # healthy silent alarm and a dead one are the same picture.
+        #
+        # `if: always()` IS the fix. Any condition here re-opens the hole, which
+        # is why a test asserts this line rather than trusting review.
+        # Editing a body (not commenting) keeps it noise-free: this file's own
+        # header warns that noise is how the next alarm gets muted.
+        # Looked up BY LABEL for the reason measured in the step above --
+        # GitHub's search index could not find an issue this workflow had just
+        # created, so a body search is not a usable key here.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEARTBEAT_LABEL: alarm-heartbeat
         run: |
-          echo "::error::Merged product work cannot reach real-app — see the job summary and the open alarm issue."
+          set -euo pipefail
+          if [ "${{ steps.measure.outcome }}" = "failure" ]; then verdict=diverged; else verdict=clear; fi
+          line=$(node -e '
+            const { heartbeatLine } = require("./scripts/alarm-liveness.js");
+            console.log(heartbeatLine({ ts: process.argv[1], event: process.argv[2], verdict: process.argv[3] }));
+          ' "$(date -u '+%Y-%m-%d %H:%M UTC')" "${{ github.event_name }}" "$verdict")
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "$line" \
+            "Written by \`.github/workflows/divergence-alarm.yml\` on **every** run, including the runs where nothing is wrong — so that \"the alarm is healthy and quiet\" and \"the alarm is dead\" stop looking identical from this page (card oWtnNDT5)." \
+            "Gap check: ${{ steps.gap.outcome }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+
+          gh label create "$HEARTBEAT_LABEL" --color 0E8A16 \
+            --description 'Liveness stamp for the divergence alarm' >/dev/null 2>&1 || true
+          hb=$(gh issue list --state open --label "$HEARTBEAT_LABEL" --json number --jq '.[0].number // empty')
+          if [ -n "$hb" ]; then
+            gh issue edit "$hb" --body "$body"
+            echo "stamped heartbeat issue #$hb"
+          else
+            gh issue create --title '🫀 Divergence alarm — liveness' --body "$body" --label "$HEARTBEAT_LABEL"
+          fi
+
+      - name: Fail the run if the alarm is up
+        # Reds for EITHER reason, and says which. The gap step is
+        # continue-on-error above so that a missed window cannot suppress the
+        # divergence measurement itself -- but it must still turn the run red
+        # here, or "the alarm skipped a window" would be recorded and never
+        # noticed, which is this card's own defect wearing a different hat.
+        if: steps.measure.outcome == 'failure' || steps.gap.outcome == 'failure'
+        run: |
+          if [ "${{ steps.gap.outcome }}" = "failure" ]; then
+            echo "::error::The divergence alarm's own liveness check failed — see the 'Detect a missed window' step."
+          fi
+          if [ "${{ steps.measure.outcome }}" = "failure" ]; then
+            echo "::error::Merged product work cannot reach real-app — see the job summary and the open alarm issue."
+          fi
           exit 1
