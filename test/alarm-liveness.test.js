@@ -113,8 +113,15 @@ test('UNKNOWN does not exit 0 — a check that cannot answer must not answer hea
 test('WIRED: the workflow stamps liveness on EVERY path, not only when diverged', () => {
   // The all-clear path is the one that wrote nothing; an `if:`-guarded stamp
   // would re-open exactly the hole this card is about.
-  assert.match(wf, /name:\s*Stamp liveness/, 'the stamp step is missing');
-  const stamp = wf.slice(wf.indexOf('name: Stamp liveness'));
+  // Anchor to END OF LINE and assert it is UNIQUE before slicing on it.
+  // Found by probe P2: /name:\s*Stamp liveness/ is a SUBSTRING match, so a step
+  // called "Stamp liveness notes" satisfies it — and if such a step sat above
+  // the real one, the slice below would read the wrong step's `if:` and report
+  // a conditional stamp as unconditional. The behaviour survives a rename; the
+  // ASSERTION is what does not survive a near-duplicate.
+  const anchors = wf.match(/^\s*- name: Stamp liveness\s*$/gm) || [];
+  assert.equal(anchors.length, 1, `expected exactly one "Stamp liveness" step, found ${anchors.length}`);
+  const stamp = wf.slice(wf.indexOf('- name: Stamp liveness'));
   assert.match(stamp.slice(0, 400), /if:\s*always\(\)/, 'the stamp step must run on every path');
 });
 
