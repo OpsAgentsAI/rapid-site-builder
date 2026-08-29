@@ -16,6 +16,7 @@ const {
   classifyRunGap,
   exitCodeFor,
   MISSED_WINDOW_HOURS,
+  MEASURED_WORST_LEGITIMATE_DELAY_HOURS,
   MEASURED_WORST_LEGITIMATE_GAP_HOURS,
   TRUE_SKIP_GAP_HOURS,
 } =
@@ -103,9 +104,11 @@ test('the threshold is a real boundary in BOTH directions', () => {
   const over = new Date(base - (MISSED_WINDOW_HOURS + 1) * 3_600_000).toISOString();
   assert.equal(classifyRunGap({ previousRunISO: under, nowISO: NOW }).status, 'FRESH');
   assert.equal(classifyRunGap({ previousRunISO: over, nowISO: NOW }).status, 'MISSED_WINDOW');
-  // 40 is the CARD's number (oPbduwRM), not an implementation detail — pinned as
-  // a literal so a future edit to the constant cannot move the assertion with it.
-  assert.equal(MISSED_WINDOW_HOURS, 40);
+  // 36 is the MIDPOINT of the usable band (card oPbduwRM), not an implementation
+  // detail — pinned as a literal so a future edit to the constant cannot move the
+  // assertion with it. It was raised to 40 once, which put it ABOVE the ceiling
+  // and made a real skip read FRESH; the literal is what makes that edit loud.
+  assert.equal(MISSED_WINDOW_HOURS, 36);
 });
 
 // ── Card oPbduwRM: BOTH EDGES OF THE BAND, pinned ──────────────────────────
@@ -127,14 +130,40 @@ test('EDGE 1 — the worst LEGITIMATE gap this repo has produced (35h19m) is FRE
     'the threshold must sit ABOVE the worst legitimate gap, or the alarm cries wolf about itself');
 });
 
-test('EDGE 2 — a genuinely skipped window (48h) is still MISSED_WINDOW', () => {
-  // The opposite failure: raising the threshold to clear the delay above would
-  // delete the detection. 48h is one 24h gap plus the 24h that was skipped.
+test('EDGE 2 — the SMALLEST true skip (48h - d_max = 36h41m) is MISSED_WINDOW', () => {
+  // 🔑 THE CASE THAT WAS NEVER PINNED, AND WHY AN OUT-OF-BAND CONSTANT SHIPPED.
+  // A skipped window does NOT land at 48h unless the run BEFORE it was on time.
+  // Delay that preceding run and the gap SHRINKS: 48h - d_max = 36h41m, on a
+  // repo that has already produced an 11h19m delay. Under the 40h threshold this
+  // exact input returned FRESH — a genuinely missed window reported healthy —
+  // and both edge tests stayed green because neither of them tested it.
   const base = Date.parse(NOW);
   const trueSkip = new Date(base - TRUE_SKIP_GAP_HOURS * 3_600_000).toISOString();
-  assert.equal(classifyRunGap({ previousRunISO: trueSkip, nowISO: NOW }).status, 'MISSED_WINDOW');
+  const r = classifyRunGap({ previousRunISO: trueSkip, nowISO: NOW });
+  assert.equal(r.status, 'MISSED_WINDOW',
+    `a ${r.gapHours}h gap IS a skipped window when the preceding run was ${MEASURED_WORST_LEGITIMATE_DELAY_HOURS}h late`);
   assert.ok(MISSED_WINDOW_HOURS < TRUE_SKIP_GAP_HOURS,
-    'the threshold must sit BELOW a true skip, or a real missed window reads as healthy');
+    'the threshold must sit BELOW the SMALLEST true skip, or a real missed window reads as healthy');
+});
+
+test('EDGE 3 — the LARGEST true skip (48h, preceding run on time) is still MISSED_WINDOW', () => {
+  // The easy case, kept as a floor. It is the ONLY true skip the old ceiling
+  // described, which is how a threshold above the real ceiling passed review.
+  const base = Date.parse(NOW);
+  const easySkip = new Date(base - 48 * 3_600_000).toISOString();
+  assert.equal(classifyRunGap({ previousRunISO: easySkip, nowISO: NOW }).status, 'MISSED_WINDOW');
+});
+
+test('the ceiling is DERIVED from the measured delay, never a literal', () => {
+  // 🔑 THE ACTUAL FIX, asserted directly. As a bare `48` this constant described
+  // the LARGEST true skip while the guards below read it as the SMALLEST, so a
+  // correct control fed a wrong constant certified an out-of-band threshold.
+  // Pinning the relationship — not the value — is what makes those guards
+  // load-bearing: raise the measured delay and BOTH edges of the band move.
+  assert.equal(TRUE_SKIP_GAP_HOURS, 48 - MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
+  assert.equal(MEASURED_WORST_LEGITIMATE_GAP_HOURS, 24 + MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
+  assert.ok(TRUE_SKIP_GAP_HOURS < 48,
+    'the smallest true skip must be BELOW 48h — 48h is the skip whose preceding run was on time');
 });
 
 test('the band is non-empty and the threshold is INSIDE it — not merely a number', () => {

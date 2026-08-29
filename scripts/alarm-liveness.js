@@ -41,45 +41,64 @@
 // moves strings. Same split as check-branch-divergence.js / branch-divergence.test.js.
 
 // The threshold must sit STRICTLY BETWEEN the worst legitimate gap and the
-// smallest real skip. Card oPbduwRM — 36h did not, and the margin was 41 minutes.
+// SMALLEST real skip. Card oPbduwRM. Both bounds move with the same measured
+// quantity, so exactly one number below is measured and the rest are derived.
 //
-// A daily cron does NOT produce 24h gaps. Two legitimate consecutive runs are
-// `24h + (delay_2 - delay_1)`, where each delay is GitHub's queue delay for that
-// window. This repo has MEASURED an 11h19m delay: run 33099305021, scheduled
-// 06:17Z, started 2026-08-27T17:36:55Z. So:
+// A daily cron does NOT produce 24h gaps. Each run starts `delay` after its
+// scheduled window, so a gap between two run STARTS carries two delays:
 //
-//     run N    on time      06:17Z day 1
-//     run N+1  11h19m late  17:36Z day 2
-//     gap                   35h19m     <- legitimate, and 36h cleared it by 41 min
+//     no skip    gap = 24h + d₂ − d₁
+//     one skip   gap = 48h + d₂ − d₁
 //
-// A delay ~41 minutes worse than one this repo has already produced would have
-// made the detector red with no window actually missed. This file's own header
-// says noise is how the next alarm gets muted, and a guard that cries wolf about
-// ITSELF is the fastest version of that.
+// 🔑 THE SIGN, because the first version of this file got it backwards and the
+// error shipped: a delay on the run AFTER (d₂) INCREASES the gap; a delay on the
+// run BEFORE (d₁) DECREASES it. So the two populations are bounded by:
 //
-// Raising it to 48h is the other failure: a genuinely skipped window lands at
-// ~48h (24h gap + 24h skipped), so 48 would classify a real skip as FRESH and
-// delete the detection this check exists for. The usable band is:
+//     worst LEGITIMATE gap   = 24h + d_max − 0      = 35h19m
+//     smallest TRUE SKIP     = 48h + 0     − d_max  = 36h41m
 //
-//     worst legitimate gap seen   ~35h19m
-//       ...usable band...
-//     smallest true skip          ~48h  (minus the next run's own delay)
+// A true skip is therefore NOT ~48h. 48h is a true skip whose preceding run was
+// ON TIME — the easiest one to catch, and the only one the old ceiling described.
 //
-// 40h takes ~4h40m of headroom over the measured worst case while staying ~8h
-// below a true skip.
+//     usable band = 35h19m ‥ 36h41m      ← 1h22m wide
+//       36h inside? YES, and it is the MIDPOINT (±41 min)
+//       40h inside? NO — above the ceiling, so a real skip reads FRESH
+//
+// ⚠️ THE ±41 MINUTES IS INHERENT AT THIS DELAY VARIANCE — IT IS NOT A TUNING
+// ERROR AND MUST NOT BE "FIXED" BY MOVING THIS NUMBER. It is exactly half the
+// band width; no constant does better. PR #75 read that 41 minutes as slack to
+// be widened, raised this to 40h, and turned a hard-to-reach false RED into an
+// easy-to-reach false GREEN: any real skip whose preceding run was >8h late read
+// FRESH, on a repo that has already produced an 11h19m delay. A false green
+// defeats the parent card (oWtnNDT5), which exists to notice a DEAD alarm.
 //
 // ⚠️ THE BAND NARROWS AS DELAYS GROW, and this constant cannot be re-tuned out
-// of that. A >12h delay on the run AFTER a skipped window pushes a true skip
-// below 48h and the two populations overlap — at which point gap-vs-threshold
-// stops discriminating at all, and the detector needs the EXPECTED WINDOW TIMES
-// rather than just the previous run's timestamp. If you find yourself tuning
+// of that: at d_max = 12h the two populations meet and gap-vs-threshold stops
+// discriminating at all. At that point the detector needs the EXPECTED WINDOW
+// TIMES rather than the previous run's timestamp. If you find yourself tuning
 // this a second time, that is the signal to change the method, not the number.
-const MISSED_WINDOW_HOURS = 40;
+const MISSED_WINDOW_HOURS = 36;
 
-/** The worst legitimate gap this repo has actually produced, in hours. Evidence for the band above. */
-const MEASURED_WORST_LEGITIMATE_GAP_HOURS = 35 + 19 / 60;
-/** A genuinely skipped daily window: one 24h gap plus the 24h that was skipped. */
-const TRUE_SKIP_GAP_HOURS = 48;
+/**
+ * THE ONE MEASURED NUMBER. GitHub's worst queue delay this repo has actually
+ * produced: run 33099305021, scheduled 06:17Z, started 2026-08-27T17:36:55Z.
+ * Every bound below is derived from it, so raising it moves both edges of the
+ * band together and the guards in the test file react on their own.
+ */
+const MEASURED_WORST_LEGITIMATE_DELAY_HOURS = 11 + 19 / 60;
+
+/** Worst gap two consecutive legitimate runs can show: 24h + the worst delay on the LATER one. */
+const MEASURED_WORST_LEGITIMATE_GAP_HOURS = 24 + MEASURED_WORST_LEGITIMATE_DELAY_HOURS;
+
+/**
+ * SMALLEST gap a genuinely skipped window can show — the ceiling of the band.
+ *
+ * DERIVED, never a literal. As the bare `48` it was the gap for a skip whose
+ * PRECEDING run was on time, i.e. the largest true skip rather than the
+ * smallest, and feeding that to the guards below made both of them pass over
+ * an out-of-band threshold. `48 − d_max` is the real ceiling.
+ */
+const TRUE_SKIP_GAP_HOURS = 48 - MEASURED_WORST_LEGITIMATE_DELAY_HOURS;
 
 /**
  * The liveness stamp. The EVENT NAME IS MANDATORY and is why this is not just a
@@ -153,6 +172,7 @@ module.exports = {
   classifyRunGap,
   exitCodeFor,
   MISSED_WINDOW_HOURS,
+  MEASURED_WORST_LEGITIMATE_DELAY_HOURS,
   MEASURED_WORST_LEGITIMATE_GAP_HOURS,
   TRUE_SKIP_GAP_HOURS,
 };
