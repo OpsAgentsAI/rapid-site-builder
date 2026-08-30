@@ -124,10 +124,17 @@ test('EDGE 1 — the worst LEGITIMATE gap this repo has produced (35h19m) is FRE
   // observed would have reddened a healthy alarm.
   const base = Date.parse(NOW);
   const worstLegit = new Date(base - MEASURED_WORST_LEGITIMATE_GAP_HOURS * 3_600_000).toISOString();
+  //
+  // ⚠️ INVERTED 2026-08-30, card FC3k6ISc. d_max was re-measured at 12h22m (run
+  // 33200295786) and the band CLOSED: worst legitimate 36h22m now EXCEEDS the
+  // smallest true skip 35h38m. So this input no longer CAN read FRESH — and
+  // that is the finding, not a regression. The test asserts the collapse
+  // instead of pretending a threshold still separates the two populations.
   const r = classifyRunGap({ previousRunISO: worstLegit, nowISO: NOW });
-  assert.equal(r.status, 'FRESH', `a ${r.gapHours}h legitimate gap must not read as a missed window`);
-  assert.ok(MISSED_WINDOW_HOURS > MEASURED_WORST_LEGITIMATE_GAP_HOURS,
-    'the threshold must sit ABOVE the worst legitimate gap, or the alarm cries wolf about itself');
+  assert.equal(r.status, 'MISSED_WINDOW',
+    `a ${r.gapHours}h LEGITIMATE gap now reads as a missed window — this is the false RED the closed band produces`);
+  assert.ok(MISSED_WINDOW_HOURS < MEASURED_WORST_LEGITIMATE_GAP_HOURS,
+    'at the measured d_max the threshold sits BELOW the worst legitimate gap — the gap method cries wolf, which is why classifyWindowCoverage exists');
 });
 
 test('EDGE 2 — the SMALLEST true skip (48h - d_max = 36h41m) is MISSED_WINDOW', () => {
@@ -139,11 +146,20 @@ test('EDGE 2 — the SMALLEST true skip (48h - d_max = 36h41m) is MISSED_WINDOW'
   // and both edge tests stayed green because neither of them tested it.
   const base = Date.parse(NOW);
   const trueSkip = new Date(base - TRUE_SKIP_GAP_HOURS * 3_600_000).toISOString();
+  //
+  // ⚠️ INVERTED 2026-08-30, card FC3k6ISc — the OTHER side of the same closure.
+  // At d_max 12h22m the smallest true skip is 35h38m, BELOW the 36h threshold,
+  // so a genuinely missed window now reads FRESH. Both edges are wrong at once:
+  // EDGE 1 is a false RED and this is a false GREEN, from ONE constant. No
+  // number fixes both, which is the whole argument for counting windows.
   const r = classifyRunGap({ previousRunISO: trueSkip, nowISO: NOW });
-  assert.equal(r.status, 'MISSED_WINDOW',
-    `a ${r.gapHours}h gap IS a skipped window when the preceding run was ${MEASURED_WORST_LEGITIMATE_DELAY_HOURS}h late`);
-  assert.ok(MISSED_WINDOW_HOURS < TRUE_SKIP_GAP_HOURS,
-    'the threshold must sit BELOW the SMALLEST true skip, or a real missed window reads as healthy');
+  assert.equal(r.status, 'FRESH',
+    `a ${r.gapHours}h gap IS a skipped window and the gap method now calls it healthy — the false GREEN half of the closed band`);
+  assert.ok(MISSED_WINDOW_HOURS > TRUE_SKIP_GAP_HOURS,
+    'at the measured d_max the threshold sits ABOVE the smallest true skip — a real missed window reads as healthy');
+  // AND the replacement gets it right on the same premise.
+  assert.ok(typeof classifyWindowCoverage === 'function',
+    'the coverage detector must exist, because no threshold can separate these two populations any more');
 });
 
 test('EDGE 3 — the LARGEST true skip (48h, preceding run on time) is still MISSED_WINDOW', () => {
@@ -169,12 +185,19 @@ test('the ceiling is DERIVED from the measured delay, never a literal', () => {
 test('the band is non-empty and the threshold is INSIDE it — not merely a number', () => {
   // A vacuity guard on the two edges above: if the constants ever cross, both
   // edge tests could be satisfied by a threshold that discriminates nothing.
-  assert.ok(MEASURED_WORST_LEGITIMATE_GAP_HOURS < TRUE_SKIP_GAP_HOURS, 'the band has collapsed');
+  // ⚠️ THIS GUARD FIRED, AND IT WAS RIGHT. It was written to catch the constants
+  // crossing; on 2026-08-30 they crossed. Kept, inverted, as the executable
+  // record: at the measured d_max the band is NEGATIVE, so NO value of
+  // MISSED_WINDOW_HOURS satisfies both edges. Re-tuning the number is not an
+  // available move — that is what "change the method, not the number" means.
   assert.ok(
-    MISSED_WINDOW_HOURS > MEASURED_WORST_LEGITIMATE_GAP_HOURS && MISSED_WINDOW_HOURS < TRUE_SKIP_GAP_HOURS,
-    `threshold ${MISSED_WINDOW_HOURS}h is outside the usable band ` +
-      `(${MEASURED_WORST_LEGITIMATE_GAP_HOURS}h .. ${TRUE_SKIP_GAP_HOURS}h)`,
+    MEASURED_WORST_LEGITIMATE_GAP_HOURS > TRUE_SKIP_GAP_HOURS,
+    `the band is expected to be CLOSED at d_max=${MEASURED_WORST_LEGITIMATE_DELAY_HOURS}h ` +
+      `(worst legitimate ${MEASURED_WORST_LEGITIMATE_GAP_HOURS}h vs smallest true skip ${TRUE_SKIP_GAP_HOURS}h). ` +
+      'If this ever reopens, d_max fell — re-derive rather than assuming.',
   );
+  const bandWidth = TRUE_SKIP_GAP_HOURS - MEASURED_WORST_LEGITIMATE_GAP_HOURS;
+  assert.ok(bandWidth < 0, `band width ${bandWidth}h must be negative`);
 });
 
 test('UNKNOWN does not exit 0 — a check that cannot answer must not answer healthy', () => {
@@ -309,6 +332,8 @@ const {
   cronFromWorkflow,
   expectedWindows,
   WINDOW_PENDING_GRACE_HOURS,
+  CRON_PERIOD_HOURS,
+  graceViolation,
 } = require('../scripts/alarm-liveness.js');
 
 const CRON = '17 6 * * *';
@@ -342,7 +367,11 @@ test('KNOWN-NEGATIVE: the REAL delays — 11h19m, 12h22m, 6h22m — are FRESH', 
 // cites was NOT a skip (workflow created 08-26 17:02; a schedule run exists for
 // 08-27, 08-28 and 08-29, one each), and fitting a replay to a non-event is how
 // a detector gets tuned to the wrong thing.
-const SKIP_SET = [day(24, 6, 20), day(25, 18, 39), /* 08-26 SKIPPED */ day(27, 6, 20), day(28, 6, 20)];
+// ⚠️ EXTENDED 2026-08-30 when the span was aligned to window instants: the
+// evaluable span now reaches 08-29, so the fixture must serve that window too
+// or it carries TWO deficits and stops isolating the one it is about. A fixture
+// built for an older span silently changes what the test measures.
+const SKIP_SET = [day(24, 6, 20), day(25, 18, 39), /* 08-26 SKIPPED */ day(27, 6, 20), day(28, 6, 20), day(29, 6, 20)];
 
 test('KNOWN-POSITIVE: a genuinely skipped window is MISSED, however late its neighbours', () => {
   const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: SKIP_SET, nowISO: day(30, 11, 0) });
@@ -440,6 +469,73 @@ test('LIVE DATA, and a correction to my own first reading of it', () => {
   // so PENDING rather than MISSED, and that is why runs(3) > windows(2).
   const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: real, nowISO });
   assert.equal(r.status, 'FRESH', JSON.stringify(r));
+  // windows == runs exactly. Before the span was aligned to window instants
+  // this read runs=3 against windows=2 — the 08-27 run belonged to a window
+  // OUTSIDE the counted set and was still counted, which is precisely the
+  // leading-edge inflation that could hide a real skip. Now W0 excludes it.
   assert.equal(r.windows, 2);
-  assert.equal(r.runs, 3);
+  assert.equal(r.runs, 2);
+});
+
+test("ref-opus's worked example: a straggler from a PRE-SPAN window must not hide a skip", () => {
+  // The exact case that made the first version of classifyWindowCoverage wrong.
+  // Counting windows by SCHEDULED instant and runs by START instant over the
+  // same CLOCK interval let a late run for a window OUTSIDE the span be counted
+  // inside it, inflating the run count until a real skip vanished.
+  //
+  //   08-23 window ran 9h late  -> 15:17Z, lands inside a clock-aligned span
+  //   08-26 window SKIPPED
+  //   windows 6, runs 6 -> FRESH, and the skip is invisible.
+  //
+  // Aligning the span to window instants excludes that straggler: its window is
+  // before W0, so its run is before W0 too.
+  const runs = [
+    '2026-08-23T15:17:00Z',            // 9h late, for the 08-23 window
+    '2026-08-24T06:20:00Z',
+    '2026-08-25T06:20:00Z',
+    /* 08-26 SKIPPED */
+    '2026-08-27T06:20:00Z',
+    '2026-08-28T06:20:00Z',
+    '2026-08-29T06:20:00Z',
+  ];
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: runs, nowISO: '2026-08-30T14:30:00Z' });
+  assert.equal(r.status, 'MISSED_WINDOW', JSON.stringify(r));
+  assert.equal(r.windows - r.runs, 1, 'exactly one window is missing — not zero, and not two');
+});
+
+test('the grace is bounded on BOTH sides, and a violation fails CLOSED', () => {
+  // d_max < grace < CRON PERIOD. The lower bound was written down from the
+  // start; the upper one was invisible until review, and held only because two
+  // unrelated constants happened to be compatible. Now asserted.
+  assert.equal(graceViolation(WINDOW_PENDING_GRACE_HOURS), null,
+    'the shipped grace must satisfy both bounds');
+  assert.ok(WINDOW_PENDING_GRACE_HOURS > MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
+  assert.ok(WINDOW_PENDING_GRACE_HOURS < CRON_PERIOD_HOURS);
+
+  assert.match(graceViolation(1) || '', /must EXCEED the worst measured delay/);
+  assert.match(graceViolation(24) || '', /must be BELOW the cron period/);
+  assert.match(graceViolation(30) || '', /must be BELOW the cron period/);
+
+  // FAILS CLOSED, not silently: an out-of-bounds grace returns UNKNOWN, which
+  // does not exit 0.
+  for (const g of [1, 24, 30]) {
+    const r = classifyWindowCoverage({
+      cronExpr: CRON, scheduleRunISOs: [day(28, 6, 20), day(29, 6, 20)],
+      nowISO: day(30, 11, 0), graceHours: g,
+    });
+    assert.equal(r.status, 'UNKNOWN', `grace ${g}h must be refused, got ${JSON.stringify(r)}`);
+    assert.notEqual(exitCodeFor(r.status), 0);
+  }
+});
+
+test('THE CONSTANT IS WIRED, not just documented — d_max matches what was measured', () => {
+  // ref-opus caught the new d_max sitting in a COMMENT while this constant
+  // still read the old value. A number in a comment and a number in a constant
+  // are not the same artefact, and only one of them is wired.
+  assert.equal(Math.round(MEASURED_WORST_LEGITIMATE_DELAY_HOURS * 60), 12 * 60 + 22,
+    'd_max must be the 12h22m measured on run 33200295786, not the superseded 11h19m');
+  // And everything downstream must actually derive from it.
+  assert.equal(MEASURED_WORST_LEGITIMATE_GAP_HOURS, 24 + MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
+  assert.equal(TRUE_SKIP_GAP_HOURS, 48 - MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
+  assert.equal(WINDOW_PENDING_GRACE_HOURS, Math.ceil(MEASURED_WORST_LEGITIMATE_DELAY_HOURS) + 2);
 });
