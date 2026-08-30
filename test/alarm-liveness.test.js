@@ -539,3 +539,19 @@ test('THE CONSTANT IS WIRED, not just documented — d_max matches what was meas
   assert.equal(TRUE_SKIP_GAP_HOURS, 48 - MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
   assert.equal(WINDOW_PENDING_GRACE_HOURS, Math.ceil(MEASURED_WORST_LEGITIMATE_DELAY_HOURS) + 2);
 });
+
+test('the OLD method is labelled SUPERSEDED, not merely "informational"', () => {
+  // ref-opus, reviewing #77: the fix CHANGED WHAT THAT LINE MEANS. Before the
+  // band closed it was a weaker-but-valid second opinion; after, it is known
+  // wrong in BOTH directions — and "informational" reads as less authoritative,
+  // not as measured-unreliable-ninety-minutes-ago. Shipping that unlabelled,
+  // inside the PR whose subject is a detector that cannot say what it does not
+  // know, would be the defect appearing in its own fix.
+  const wf = fs.readFileSync(WF, 'utf8');
+  assert.match(wf, /SUPERSEDED — band closed/,
+    'the old detector\'s output must be labelled superseded, with the date the band closed');
+  assert.ok(!/old method, informational/.test(wf),
+    'the "informational" wording understates a detector that is wrong in both directions');
+  // and it is still PRINTED, not deleted — AC-3 keeps it comparable on real runs
+  assert.match(wf, /classifyRunGap/);
+});

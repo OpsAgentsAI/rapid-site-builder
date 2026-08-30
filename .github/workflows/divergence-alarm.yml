@@ -125,7 +125,15 @@ jobs:
             const r = classifyWindowCoverage({ cronExpr, scheduleRunISOs: starts, nowISO });
             console.log("alarm coverage: " + r.status + " (" + r.reason + "; windows=" + r.windows + " runs=" + r.runs + ", cron=" + cronExpr + ")");
             const old = classifyRunGap({ previousRunISO: process.argv[2] || null, nowISO });
-            console.log("alarm gap (old method, informational): " + old.status + " (" + (old.gapHours === null ? "n/a" : old.gapHours.toFixed(1) + "h") + ")");
+            // ⚠️ NOT "informational" — SUPERSEDED, and known wrong in BOTH
+            // directions. At the measured d_max of 12h22m the gap method has no
+            // usable band (worst legitimate 36h22m > smallest true skip 35h38m),
+            // so this line can print FRESH beside a real MISSED_WINDOW and
+            // MISSED_WINDOW beside a healthy run. "Informational" reads as less
+            // authoritative; it does not read as measured-unreliable. Kept only
+            // so the two methods can be compared on real runs while the
+            // replacement earns its keep. Found in review by ref-opus.
+            console.log("alarm gap (old method, SUPERSEDED — band closed 2026-08-30, can be wrong in both directions): " + old.status + " (" + (old.gapHours === null ? "n/a" : old.gapHours.toFixed(1) + "h") + ")");
             if (r.status === "MISSED_WINDOW") console.log("::error::The divergence alarm skipped " + (r.windows - r.runs) + " scheduled window(s) — " + r.runs + " schedule runs for " + r.windows + " windows.");
             if (r.status === "UNKNOWN") console.log("::error::The divergence alarm cannot judge its own window coverage (" + r.reason + ").");
             process.exit(exitCodeFor(r.status));
