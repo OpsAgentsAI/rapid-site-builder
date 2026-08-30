@@ -291,3 +291,155 @@ test('CONTROL: the actions:read assertion is not satisfied by its own comment', 
   assert.ok(!/^\s*#.*actions: read/m.test(wf),
     'stripYamlComments left a commented mention in place — every assertion on `wf` is suspect');
 });
+
+
+// ── Card FC3k6ISc: window COVERAGE, the method that replaces gap-vs-threshold ─
+// Two of the proposing card's assumptions were refuted by measurement before a
+// line was written, and the tests below encode what survived:
+//   ❌ created_at ≈ the scheduled window — it does NOT; created_at ===
+//      run_started_at on all 7 runs, including the 11h19m-late one.
+//   🔴 "41 minutes of margin, not urgent" — d_max is 12h22m (run 33200295786),
+//      past the 12h where the populations meet. The band had already closed.
+// So runs are never attributed to individual windows; they are COUNTED against
+// them over one closed span. See the header block in alarm-liveness.js.
+
+const {
+  classifyWindowCoverage,
+  parseDailyCron,
+  cronFromWorkflow,
+  expectedWindows,
+  WINDOW_PENDING_GRACE_HOURS,
+} = require('../scripts/alarm-liveness.js');
+
+const CRON = '17 6 * * *';
+/** Windows served on time-ish, one per day. */
+const day = (d, h, m) => `2026-08-${String(d).padStart(2, '0')}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
+
+test('AC-2: the cron the detector uses is READ FROM the workflow, and they agree', () => {
+  const wf = fs.readFileSync(WF, 'utf8');
+  const fromFile = cronFromWorkflow(wf);
+  assert.ok(fromFile, 'no cron found in divergence-alarm.yml');
+  // VACUITY GUARD: the regex must have found a real schedule, not matched empty.
+  assert.match(wf, /schedule:/);
+  assert.ok(parseDailyCron(fromFile), `cron ${JSON.stringify(fromFile)} is not a supported daily shape`);
+  // THE POINT OF THIS TEST: change the workflow's schedule and this reds, so the
+  // detector can never silently desynchronise from the thing it watches.
+  assert.equal(fromFile, CRON);
+});
+
+test('KNOWN-NEGATIVE: the REAL delays — 11h19m, 12h22m, 6h22m — are FRESH', () => {
+  // This is the case the old method can no longer get right: d_max 12h22m puts
+  // MISSED_WINDOW_HOURS=36 inside the overlap. Counting is indifferent to it.
+  const runs = [day(27, 17, 36), day(28, 18, 39), day(29, 12, 39)];
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: runs, nowISO: day(30, 11, 0) });
+  assert.equal(r.status, 'FRESH', JSON.stringify(r));
+});
+
+// ONE dataset, both methods. 08-26 is skipped; the run before it was 12h22m
+// late (the real d_max, run 33200295786) and the run after it was on time —
+// which is precisely the d₁ > d₂ case that SHRINKS the gap below any usable
+// threshold. Synthetic, and said so: the 2026-08-27 "incident" the parent card
+// cites was NOT a skip (workflow created 08-26 17:02; a schedule run exists for
+// 08-27, 08-28 and 08-29, one each), and fitting a replay to a non-event is how
+// a detector gets tuned to the wrong thing.
+const SKIP_SET = [day(24, 6, 20), day(25, 18, 39), /* 08-26 SKIPPED */ day(27, 6, 20), day(28, 6, 20)];
+
+test('KNOWN-POSITIVE: a genuinely skipped window is MISSED, however late its neighbours', () => {
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: SKIP_SET, nowISO: day(30, 11, 0) });
+  assert.equal(r.status, 'MISSED_WINDOW', JSON.stringify(r));
+  assert.equal(r.windows - r.runs, 1);
+});
+
+test('THE WHOLE POINT: the OLD method calls that SAME skip FRESH — at BOTH thresholds ever shipped', () => {
+  // The gap the old detector actually sees across the skip is 08-25T18:39 ->
+  // 08-27T06:20 = 35h41m, because the earlier run was 12h22m late. That is
+  // below 36 AND below 40, so neither the current constant nor PR #75's sees it.
+  // No constant can: 35h41m is also a perfectly ordinary no-skip gap.
+  for (const thresholdHours of [MISSED_WINDOW_HOURS, 40]) {
+    const old = classifyRunGap({ previousRunISO: day(25, 18, 39), nowISO: day(27, 6, 20), thresholdHours });
+    assert.equal(old.status, 'FRESH', `threshold ${thresholdHours} should read this real skip as FRESH`);
+    assert.ok(old.gapHours > 35 && old.gapHours < 36, `gap ${old.gapHours}`);
+  }
+});
+
+test('a window younger than the grace is PENDING, not MISSED', () => {
+  // Today's 06:17Z window with no run yet, 5h in. A run may still be up to
+  // d_max late; calling that a miss is the cry-wolf direction.
+  const runs = [day(27, 17, 36), day(28, 18, 39), day(29, 12, 39)];
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: runs, nowISO: day(30, 11, 17) });
+  assert.equal(r.status, 'FRESH');
+  assert.ok(WINDOW_PENDING_GRACE_HOURS > MEASURED_WORST_LEGITIMATE_DELAY_HOURS,
+    'the grace must exceed the worst delay ever seen, or a late run reads as a miss');
+});
+
+test('FAIL CLOSED: an unreadable schedule or run list is UNKNOWN, never FRESH', () => {
+  const runs = [day(29, 12, 39)];
+  for (const bad of ['*/5 * * * *', '17 6 * * 1', '', 'not-a-cron', null]) {
+    assert.equal(classifyWindowCoverage({ cronExpr: bad, scheduleRunISOs: runs, nowISO: day(30, 11, 0) }).status,
+      'UNKNOWN', `cron ${JSON.stringify(bad)} should be UNKNOWN`);
+  }
+  assert.equal(classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: null, nowISO: day(30, 11, 0) }).status, 'UNKNOWN');
+  assert.equal(classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: ['not-a-date'], nowISO: day(30, 11, 0) }).status, 'UNKNOWN');
+  // and UNKNOWN still does not exit 0
+  assert.notEqual(exitCodeFor('UNKNOWN'), 0);
+});
+
+test('a freshly-added workflow is FIRST_RUN, not "missed every window in the horizon"', () => {
+  assert.equal(classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: [], nowISO: day(30, 11, 0) }).status, 'FIRST_RUN');
+  // one run, yesterday: the horizon must not reach back before it existed
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: [day(29, 12, 39)], nowISO: day(30, 11, 0) });
+  assert.notEqual(r.status, 'MISSED_WINDOW', JSON.stringify(r));
+});
+
+test('AC-3: the OLD detector is still exported and still works — not deleted to install this', () => {
+  assert.equal(typeof classifyRunGap, 'function');
+  assert.equal(classifyRunGap({ previousRunISO: null, nowISO: day(30, 11, 0) }).status, 'FIRST_RUN');
+  assert.equal(classifyRunGap({ previousRunISO: 'nope', nowISO: day(30, 11, 0) }).status, 'UNKNOWN');
+  assert.equal(typeof MISSED_WINDOW_HOURS, 'number');
+});
+
+test('expectedWindows enumerates one instant per day, at the cron time', () => {
+  const w = expectedWindows({ minute: 17, hour: 6 }, Date.parse(day(27, 0, 0)), Date.parse(day(30, 0, 0)));
+  assert.deepEqual(w.map((t) => new Date(t).toISOString()),
+    ['2026-08-27T06:17:00.000Z', '2026-08-28T06:17:00.000Z', '2026-08-29T06:17:00.000Z']);
+});
+
+test('CALL SITE: the workflow actually calls the coverage detector, not just the old one', () => {
+  // This repo has already shipped a guard whose logic was right and whose call
+  // site was absent (card LEBxGF5d). A correct module nobody invokes is
+  // decoration, and the unit tests above cannot tell the difference.
+  const wf = fs.readFileSync(WF, 'utf8');
+  assert.match(wf, /classifyWindowCoverage/, 'the workflow must call the coverage detector');
+  assert.match(wf, /cronFromWorkflow/, 'the cron must be read from the workflow file itself');
+  assert.match(wf, /event=schedule/, 'only schedule runs serve a window — a dispatch must not mask a dead cron');
+  // AC-3: the old detector is still invoked and reported, not deleted.
+  assert.match(wf, /classifyRunGap/, 'the old detector should still be reported alongside');
+  // VACUITY GUARD: prove the file really is the workflow we think it is.
+  assert.match(wf, /divergence-alarm/);
+});
+
+test('LIVE DATA, and a correction to my own first reading of it', () => {
+  // ⚠️ I nearly shipped this test asserting the OLD method was RED on today's
+  // real list. It is not. My dry run passed starts[1] — the SECOND-most-recent
+  // schedule run — because the workflow's per_page=2 fetch has [0]=this run and
+  // [1]=previous, and my hand-run list contained no current run to occupy [0].
+  // Off by one index, and it would have shipped as "measured live".
+  //   real gap 08-29T12:39:53Z -> 2026-08-30T11:19Z = 22.7h  => FRESH, correctly.
+  // Recorded rather than quietly fixed: an off-by-one in the SETUP produces a
+  // confident wrong measurement that looks exactly like a real one.
+  const real = ['2026-08-29T12:39:53Z', '2026-08-28T18:39:36Z', '2026-08-27T17:36:55Z'];
+  const nowISO = '2026-08-30T11:19:00Z';
+
+  const old = classifyRunGap({ previousRunISO: real[0], nowISO });
+  assert.equal(old.status, 'FRESH');
+  assert.ok(old.gapHours > 22 && old.gapHours < 23, `gap ${old.gapHours}`);
+
+  // The two methods AGREE on today's data, which is the honest result and still
+  // worth pinning: the replacement must not change the verdict on a healthy
+  // repo. Today's 06:17Z window is ~5h old and unserved — inside the 14h grace,
+  // so PENDING rather than MISSED, and that is why runs(3) > windows(2).
+  const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: real, nowISO });
+  assert.equal(r.status, 'FRESH', JSON.stringify(r));
+  assert.equal(r.windows, 2);
+  assert.equal(r.runs, 3);
+});

@@ -96,20 +96,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # per_page=2: [0] is THIS run, [1] is the previous one. Empty on the
-          # very first run, which classifyRunGap reports as FIRST_RUN rather
-          # than as a fault -- a guard that is red on day one gets deleted.
+          # Card FC3k6ISc: the VERDICT now comes from window COVERAGE, not from
+          # the gap between two run starts. Measured 2026-08-30, this repo's
+          # worst queue delay is 12h22m -- past the 12h at which the two
+          # populations gap-vs-threshold must separate MEET. No constant works
+          # any more, so nothing is tuned; the method changed.
+          #
+          # SCHEDULE runs only: a workflow_dispatch does not serve a window, and
+          # counting one would let a human pressing the button hide a dead cron.
+          runs=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=100&event=schedule" \
+                   --jq '[.workflow_runs[].run_started_at]' || echo 'null')
+          # per_page=2 for the OLD detector, kept alongside and REPORTED, not
+          # deleted -- a working detector is not removed to install an unproven
+          # one (card AC-3). Its verdict is informational; the exit code below
+          # is the coverage check's.
           prev=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=2" \
-                   --jq '.workflow_runs[1].created_at // empty' || echo '')
+                   --jq '.workflow_runs[1].run_started_at // empty' || echo '')
           node -e '
-            const { classifyRunGap, exitCodeFor } = require("./scripts/alarm-liveness.js");
-            const r = classifyRunGap({ previousRunISO: process.argv[1] || null, nowISO: new Date().toISOString() });
-            const gap = r.gapHours === null ? "n/a" : r.gapHours.toFixed(1) + "h";
-            console.log("alarm gap: " + r.status + " (since previous run: " + gap + ")");
-            if (r.status === "MISSED_WINDOW") console.log("::error::The divergence alarm skipped a window — " + gap + " since its previous run.");
-            if (r.status === "UNKNOWN") console.log("::error::The divergence alarm cannot read its own last run time.");
+            const fs = require("fs");
+            const { classifyWindowCoverage, cronFromWorkflow, classifyRunGap, exitCodeFor } = require("./scripts/alarm-liveness.js");
+            const nowISO = new Date().toISOString();
+            // The cron is read from the workflow file ITSELF, so changing the
+            // schedule cannot silently desynchronise the detector from the
+            // thing it watches. A test reds if the two ever disagree.
+            const cronExpr = cronFromWorkflow(fs.readFileSync(".github/workflows/divergence-alarm.yml", "utf8"));
+            let starts = null;
+            try { starts = JSON.parse(process.argv[1]); } catch (e) { starts = null; }
+            const r = classifyWindowCoverage({ cronExpr, scheduleRunISOs: starts, nowISO });
+            console.log("alarm coverage: " + r.status + " (" + r.reason + "; windows=" + r.windows + " runs=" + r.runs + ", cron=" + cronExpr + ")");
+            const old = classifyRunGap({ previousRunISO: process.argv[2] || null, nowISO });
+            console.log("alarm gap (old method, informational): " + old.status + " (" + (old.gapHours === null ? "n/a" : old.gapHours.toFixed(1) + "h") + ")");
+            if (r.status === "MISSED_WINDOW") console.log("::error::The divergence alarm skipped " + (r.windows - r.runs) + " scheduled window(s) — " + r.runs + " schedule runs for " + r.windows + " windows.");
+            if (r.status === "UNKNOWN") console.log("::error::The divergence alarm cannot judge its own window coverage (" + r.reason + ").");
             process.exit(exitCodeFor(r.status));
-          ' "$prev"
+          ' "$runs" "$prev"
 
       - name: Measure unreachable work
         id: measure
