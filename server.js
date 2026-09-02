@@ -25,6 +25,7 @@ const { llmsTxt } = require('./lib/llmeo');
 const auth = require('./lib/auth');
 const uploads = require('./lib/uploads');
 const p2b = require('./lib/p2b-media');
+const analytics = require('./lib/analytics');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -283,6 +284,25 @@ app.get('/api/auth-config', (req, res) => {
       ? { apiKey: auth.FB_API_KEY, authDomain: auth.FB_AUTH_DOMAIN, projectId: auth.FB_PROJECT }
       : null,
     me: session ? { uid: session.uid || null, email: session.email || '' } : null
+  });
+});
+
+// Public analytics config (card u4xmePAo). The PROJECT key is public by
+// design — write-only, browser-safe — but it is served rather than baked into
+// the HTML so that (a) nothing is committed to this Apache-2.0 repo, and (b)
+// an unbound deployment answers `enabled:false` instead of shipping a page
+// wired to a key that does not exist.
+//
+// `reason` travels even when disabled, deliberately: "nobody bound a key",
+// "somebody pasted a personal key" and "the key is truncated" are three
+// different operator actions, and `enabled:false` alone reads as opt-out.
+app.get('/api/analytics-config', (_req, res) => {
+  const v = analytics.VERDICT;
+  res.set('Cache-Control', 'no-store').json({
+    enabled: v.enabled,
+    reason: v.reason,
+    apiHost: v.apiHost,
+    projectKey: v.projectKey,
   });
 });
 
@@ -595,6 +615,7 @@ app.get('/api/health', (_req, res) => res.json({
   auth: auth.AUTH_ENABLED,
   uploadsBucket: uploads.ENABLED,
   customDomains: domains.ENABLED,
+  posthog: analytics.ENABLED,
   categories: Object.keys(CATEGORIES)
 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
