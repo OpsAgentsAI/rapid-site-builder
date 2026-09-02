@@ -13,9 +13,7 @@ const path = require('node:path');
 
 const {
   heartbeatLine,
-  classifyRunGap,
   exitCodeFor,
-  MISSED_WINDOW_HOURS,
   MEASURED_WORST_LEGITIMATE_DELAY_HOURS,
   MEASURED_WORST_LEGITIMATE_GAP_HOURS,
   TRUE_SKIP_GAP_HOURS,
@@ -64,112 +62,6 @@ test('an unknown verdict is refused — "clear" must never be the default', () =
 // ── classifyRunGap ─────────────────────────────────────────────────────────
 const NOW = '2026-08-28T06:17:00Z';
 
-test('a normal daily cadence is FRESH', () => {
-  const r = classifyRunGap({ previousRunISO: '2026-08-27T06:17:00Z', nowISO: NOW });
-  assert.equal(r.status, 'FRESH');
-  assert.equal(Math.round(r.gapHours), 24);
-});
-
-test('the 11h19m delay actually observed on run 33099305021 is still FRESH — not a cry wolf', () => {
-  // Measured: the 06:17Z window was delivered at 17:36:55Z. If that reads as a
-  // missed window the check fires on healthy behaviour and gets switched off.
-  const r = classifyRunGap({ previousRunISO: '2026-08-27T17:36:55Z', nowISO: NOW });
-  assert.equal(r.status, 'FRESH');
-});
-
-test('a genuinely missed window is MISSED_WINDOW', () => {
-  const r = classifyRunGap({ previousRunISO: '2026-08-26T06:17:00Z', nowISO: NOW });
-  assert.equal(r.status, 'MISSED_WINDOW');
-  assert.ok(r.gapHours > MISSED_WINDOW_HOURS);
-});
-
-test('the FIRST run is not a missed window — a fresh install must not be red', () => {
-  assert.equal(classifyRunGap({ previousRunISO: null, nowISO: NOW }).status, 'FIRST_RUN');
-  assert.equal(classifyRunGap({ previousRunISO: '', nowISO: NOW }).status, 'FIRST_RUN');
-});
-
-test('an UNPARSEABLE previous timestamp is UNKNOWN, never FRESH — fail closed', () => {
-  const r = classifyRunGap({ previousRunISO: 'not-a-date', nowISO: NOW });
-  assert.equal(r.status, 'UNKNOWN');
-  assert.equal(r.gapHours, null);
-});
-
-test('a broken NOW throws rather than answering', () => {
-  assert.throws(() => classifyRunGap({ previousRunISO: NOW, nowISO: 'nope' }), /unparseable nowISO/);
-});
-
-test('the threshold is a real boundary in BOTH directions', () => {
-  const base = Date.parse(NOW);
-  const under = new Date(base - (MISSED_WINDOW_HOURS - 1) * 3_600_000).toISOString();
-  const over = new Date(base - (MISSED_WINDOW_HOURS + 1) * 3_600_000).toISOString();
-  assert.equal(classifyRunGap({ previousRunISO: under, nowISO: NOW }).status, 'FRESH');
-  assert.equal(classifyRunGap({ previousRunISO: over, nowISO: NOW }).status, 'MISSED_WINDOW');
-  // 36 is the MIDPOINT of the usable band (card oPbduwRM), not an implementation
-  // detail — pinned as a literal so a future edit to the constant cannot move the
-  // assertion with it. It was raised to 40 once, which put it ABOVE the ceiling
-  // and made a real skip read FRESH; the literal is what makes that edit loud.
-  assert.equal(MISSED_WINDOW_HOURS, 36);
-});
-
-// ── Card oPbduwRM: BOTH EDGES OF THE BAND, pinned ──────────────────────────
-// The threshold has two ways to be wrong and they pull in opposite directions.
-// A test on only one side lets the next tune silently destroy the other, which
-// is why these are two assertions and not one.
-
-test('EDGE 1 — the worst LEGITIMATE gap this repo has produced (35h19m) is FRESH', () => {
-  // Derived, not guessed: run 33099305021 was scheduled 06:17Z and started
-  // 2026-08-27T17:36:55Z, an 11h19m queue delay. An on-time run followed by one
-  // that late is 24h + 11h19m apart with NO window missed. Under the old 36h
-  // threshold this cleared by 41 minutes — a delay barely worse than one already
-  // observed would have reddened a healthy alarm.
-  const base = Date.parse(NOW);
-  const worstLegit = new Date(base - MEASURED_WORST_LEGITIMATE_GAP_HOURS * 3_600_000).toISOString();
-  //
-  // ⚠️ INVERTED 2026-08-30, card FC3k6ISc. d_max was re-measured at 12h22m (run
-  // 33200295786) and the band CLOSED: worst legitimate 36h22m now EXCEEDS the
-  // smallest true skip 35h38m. So this input no longer CAN read FRESH — and
-  // that is the finding, not a regression. The test asserts the collapse
-  // instead of pretending a threshold still separates the two populations.
-  const r = classifyRunGap({ previousRunISO: worstLegit, nowISO: NOW });
-  assert.equal(r.status, 'MISSED_WINDOW',
-    `a ${r.gapHours}h LEGITIMATE gap now reads as a missed window — this is the false RED the closed band produces`);
-  assert.ok(MISSED_WINDOW_HOURS < MEASURED_WORST_LEGITIMATE_GAP_HOURS,
-    'at the measured d_max the threshold sits BELOW the worst legitimate gap — the gap method cries wolf, which is why classifyWindowCoverage exists');
-});
-
-test('EDGE 2 — the SMALLEST true skip (48h - d_max = 36h41m) is MISSED_WINDOW', () => {
-  // 🔑 THE CASE THAT WAS NEVER PINNED, AND WHY AN OUT-OF-BAND CONSTANT SHIPPED.
-  // A skipped window does NOT land at 48h unless the run BEFORE it was on time.
-  // Delay that preceding run and the gap SHRINKS: 48h - d_max = 36h41m, on a
-  // repo that has already produced an 11h19m delay. Under the 40h threshold this
-  // exact input returned FRESH — a genuinely missed window reported healthy —
-  // and both edge tests stayed green because neither of them tested it.
-  const base = Date.parse(NOW);
-  const trueSkip = new Date(base - TRUE_SKIP_GAP_HOURS * 3_600_000).toISOString();
-  //
-  // ⚠️ INVERTED 2026-08-30, card FC3k6ISc — the OTHER side of the same closure.
-  // At d_max 12h22m the smallest true skip is 35h38m, BELOW the 36h threshold,
-  // so a genuinely missed window now reads FRESH. Both edges are wrong at once:
-  // EDGE 1 is a false RED and this is a false GREEN, from ONE constant. No
-  // number fixes both, which is the whole argument for counting windows.
-  const r = classifyRunGap({ previousRunISO: trueSkip, nowISO: NOW });
-  assert.equal(r.status, 'FRESH',
-    `a ${r.gapHours}h gap IS a skipped window and the gap method now calls it healthy — the false GREEN half of the closed band`);
-  assert.ok(MISSED_WINDOW_HOURS > TRUE_SKIP_GAP_HOURS,
-    'at the measured d_max the threshold sits ABOVE the smallest true skip — a real missed window reads as healthy');
-  // AND the replacement gets it right on the same premise.
-  assert.ok(typeof classifyWindowCoverage === 'function',
-    'the coverage detector must exist, because no threshold can separate these two populations any more');
-});
-
-test('EDGE 3 — the LARGEST true skip (48h, preceding run on time) is still MISSED_WINDOW', () => {
-  // The easy case, kept as a floor. It is the ONLY true skip the old ceiling
-  // described, which is how a threshold above the real ceiling passed review.
-  const base = Date.parse(NOW);
-  const easySkip = new Date(base - 48 * 3_600_000).toISOString();
-  assert.equal(classifyRunGap({ previousRunISO: easySkip, nowISO: NOW }).status, 'MISSED_WINDOW');
-});
-
 test('the ceiling is DERIVED from the measured delay, never a literal', () => {
   // 🔑 THE ACTUAL FIX, asserted directly. As a bare `48` this constant described
   // the LARGEST true skip while the guards below read it as the SMALLEST, so a
@@ -180,24 +72,6 @@ test('the ceiling is DERIVED from the measured delay, never a literal', () => {
   assert.equal(MEASURED_WORST_LEGITIMATE_GAP_HOURS, 24 + MEASURED_WORST_LEGITIMATE_DELAY_HOURS);
   assert.ok(TRUE_SKIP_GAP_HOURS < 48,
     'the smallest true skip must be BELOW 48h — 48h is the skip whose preceding run was on time');
-});
-
-test('the band is non-empty and the threshold is INSIDE it — not merely a number', () => {
-  // A vacuity guard on the two edges above: if the constants ever cross, both
-  // edge tests could be satisfied by a threshold that discriminates nothing.
-  // ⚠️ THIS GUARD FIRED, AND IT WAS RIGHT. It was written to catch the constants
-  // crossing; on 2026-08-30 they crossed. Kept, inverted, as the executable
-  // record: at the measured d_max the band is NEGATIVE, so NO value of
-  // MISSED_WINDOW_HOURS satisfies both edges. Re-tuning the number is not an
-  // available move — that is what "change the method, not the number" means.
-  assert.ok(
-    MEASURED_WORST_LEGITIMATE_GAP_HOURS > TRUE_SKIP_GAP_HOURS,
-    `the band is expected to be CLOSED at d_max=${MEASURED_WORST_LEGITIMATE_DELAY_HOURS}h ` +
-      `(worst legitimate ${MEASURED_WORST_LEGITIMATE_GAP_HOURS}h vs smallest true skip ${TRUE_SKIP_GAP_HOURS}h). ` +
-      'If this ever reopens, d_max fell — re-derive rather than assuming.',
-  );
-  const bandWidth = TRUE_SKIP_GAP_HOURS - MEASURED_WORST_LEGITIMATE_GAP_HOURS;
-  assert.ok(bandWidth < 0, `band width ${bandWidth}h must be negative`);
 });
 
 test('UNKNOWN does not exit 0 — a check that cannot answer must not answer healthy', () => {
@@ -379,18 +253,6 @@ test('KNOWN-POSITIVE: a genuinely skipped window is MISSED, however late its nei
   assert.equal(r.windows - r.runs, 1);
 });
 
-test('THE WHOLE POINT: the OLD method calls that SAME skip FRESH — at BOTH thresholds ever shipped', () => {
-  // The gap the old detector actually sees across the skip is 08-25T18:39 ->
-  // 08-27T06:20 = 35h41m, because the earlier run was 12h22m late. That is
-  // below 36 AND below 40, so neither the current constant nor PR #75's sees it.
-  // No constant can: 35h41m is also a perfectly ordinary no-skip gap.
-  for (const thresholdHours of [MISSED_WINDOW_HOURS, 40]) {
-    const old = classifyRunGap({ previousRunISO: day(25, 18, 39), nowISO: day(27, 6, 20), thresholdHours });
-    assert.equal(old.status, 'FRESH', `threshold ${thresholdHours} should read this real skip as FRESH`);
-    assert.ok(old.gapHours > 35 && old.gapHours < 36, `gap ${old.gapHours}`);
-  }
-});
-
 test('a window younger than the grace is PENDING, not MISSED', () => {
   // Today's 06:17Z window with no run yet, 5h in. A run may still be up to
   // d_max late; calling that a miss is the cry-wolf direction.
@@ -420,13 +282,6 @@ test('a freshly-added workflow is FIRST_RUN, not "missed every window in the hor
   assert.notEqual(r.status, 'MISSED_WINDOW', JSON.stringify(r));
 });
 
-test('AC-3: the OLD detector is still exported and still works — not deleted to install this', () => {
-  assert.equal(typeof classifyRunGap, 'function');
-  assert.equal(classifyRunGap({ previousRunISO: null, nowISO: day(30, 11, 0) }).status, 'FIRST_RUN');
-  assert.equal(classifyRunGap({ previousRunISO: 'nope', nowISO: day(30, 11, 0) }).status, 'UNKNOWN');
-  assert.equal(typeof MISSED_WINDOW_HOURS, 'number');
-});
-
 test('expectedWindows enumerates one instant per day, at the cron time', () => {
   const w = expectedWindows({ minute: 17, hour: 6 }, Date.parse(day(27, 0, 0)), Date.parse(day(30, 0, 0)));
   assert.deepEqual(w.map((t) => new Date(t).toISOString()),
@@ -441,8 +296,12 @@ test('CALL SITE: the workflow actually calls the coverage detector, not just the
   assert.match(wf, /classifyWindowCoverage/, 'the workflow must call the coverage detector');
   assert.match(wf, /cronFromWorkflow/, 'the cron must be read from the workflow file itself');
   assert.match(wf, /event=schedule/, 'only schedule runs serve a window — a dispatch must not mask a dead cron');
-  // AC-3: the old detector is still invoked and reported, not deleted.
-  assert.match(wf, /classifyRunGap/, 'the old detector should still be reported alongside');
+  // ⚠️ This line USED to assert the opposite — "the old detector should still be
+  // reported alongside" (FC3k6ISc AC-3, correct while the replacement was
+  // unproven). Card OynwcCbs retired that method, and an assertion that a
+  // deleted symbol is still called is the next reader's trap. Flipped, and the
+  // absence is proven meaningful by the two live assertions above it.
+  assert.ok(!/classifyRunGap/.test(wf), 'the retired gap method must not be invoked here any more');
   // VACUITY GUARD: prove the file really is the workflow we think it is.
   assert.match(wf, /divergence-alarm/);
 });
@@ -459,12 +318,11 @@ test('LIVE DATA, and a correction to my own first reading of it', () => {
   const real = ['2026-08-29T12:39:53Z', '2026-08-28T18:39:36Z', '2026-08-27T17:36:55Z'];
   const nowISO = '2026-08-30T11:19:00Z';
 
-  const old = classifyRunGap({ previousRunISO: real[0], nowISO });
-  assert.equal(old.status, 'FRESH');
-  assert.ok(old.gapHours > 22 && old.gapHours < 23, `gap ${old.gapHours}`);
-
-  // The two methods AGREE on today's data, which is the honest result and still
-  // worth pinning: the replacement must not change the verdict on a healthy
+  // The old method's arm was removed with the method itself (card OynwcCbs).
+  // The off-by-one lesson above is kept because it is about the SETUP, not the
+  // detector, and it applies to any future hand-built run list.
+  //
+  // What still matters: the replacement must not change the verdict on a healthy
   // repo. Today's 06:17Z window is ~5h old and unserved — inside the 14h grace,
   // so PENDING rather than MISSED, and that is why runs(3) > windows(2).
   const r = classifyWindowCoverage({ cronExpr: CRON, scheduleRunISOs: real, nowISO });
@@ -540,18 +398,22 @@ test('THE CONSTANT IS WIRED, not just documented — d_max matches what was meas
   assert.equal(WINDOW_PENDING_GRACE_HOURS, Math.ceil(MEASURED_WORST_LEGITIMATE_DELAY_HOURS) + 2);
 });
 
-test('the OLD method is labelled SUPERSEDED, not merely "informational"', () => {
-  // ref-opus, reviewing #77: the fix CHANGED WHAT THAT LINE MEANS. Before the
-  // band closed it was a weaker-but-valid second opinion; after, it is known
-  // wrong in BOTH directions — and "informational" reads as less authoritative,
-  // not as measured-unreliable-ninety-minutes-ago. Shipping that unlabelled,
-  // inside the PR whose subject is a detector that cannot say what it does not
-  // know, would be the defect appearing in its own fix.
+test('the SUPERSEDED gap method is GONE from the alarm — one verdict, not two', () => {
+  // ⚠️ INVERTED by card OynwcCbs, and the inversion is the point. This test used
+  // to assert the old verdict was correctly LABELLED superseded, because it was
+  // still printed beside the live one. That labelling was the right call while
+  // the replacement was unproven — but a retired method that still speaks is
+  // worse than a deleted one: two lines, two answers, and the reader has to know
+  // which is authoritative from a parenthetical.
+  //
+  // A test that pins a deleted behaviour is the next reader's trap, so it asserts
+  // the ABSENCE instead — with the vacuity guard below, because "the string is
+  // gone" is also true of a workflow that no longer exists or was never read.
   const wf = fs.readFileSync(WF, 'utf8');
-  assert.match(wf, /SUPERSEDED — band closed/,
-    'the old detector\'s output must be labelled superseded, with the date the band closed');
-  assert.ok(!/old method, informational/.test(wf),
-    'the "informational" wording understates a detector that is wrong in both directions');
-  // and it is still PRINTED, not deleted — AC-3 keeps it comparable on real runs
-  assert.match(wf, /classifyRunGap/);
+  assert.ok(!/classifyRunGap/.test(wf), 'the retired gap method must not be called by the alarm');
+  assert.ok(!/alarm gap \(old method/.test(wf), 'the second verdict line must be gone');
+  assert.ok(!/SUPERSEDED — band closed/.test(wf), 'the superseded label goes with the method it labelled');
+  // VACUITY: the file was actually read and still contains the live detector.
+  assert.match(wf, /classifyWindowCoverage/, 'the workflow no longer calls the coverage detector either — the absence above proves nothing');
+  assert.match(wf, /alarm coverage: /, 'the surviving verdict line is missing');
 });
