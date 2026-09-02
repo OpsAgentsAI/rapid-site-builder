@@ -107,14 +107,17 @@ jobs:
           runs=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=100&event=schedule" \
                    --jq '[.workflow_runs[].run_started_at]' || echo 'null')
           # per_page=2 for the OLD detector, kept alongside and REPORTED, not
-          # deleted -- a working detector is not removed to install an unproven
-          # one (card AC-3). Its verdict is informational; the exit code below
-          # is the coverage check's.
-          prev=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=2" \
-                   --jq '.workflow_runs[1].run_started_at // empty' || echo '')
+          # Card OynwcCbs: the superseded gap method is GONE. It used to print a
+          # SECOND verdict beside this one, and a retired method that still speaks
+          # is worse than a deleted one -- two lines, two answers, and the reader
+          # has to know which is authoritative from a parenthetical. The
+          # replacement earned the deletion first: a synthetic SKIPPED window
+          # makes classifyWindowCoverage report MISSED_WINDOW (deficit-1) while an
+          # all-served span reports FRESH, so it is known to DISCRIMINATE rather
+          # than merely known to say FRESH.
           node -e '
             const fs = require("fs");
-            const { classifyWindowCoverage, cronFromWorkflow, classifyRunGap, exitCodeFor } = require("./scripts/alarm-liveness.js");
+            const { classifyWindowCoverage, cronFromWorkflow, exitCodeFor } = require("./scripts/alarm-liveness.js");
             const nowISO = new Date().toISOString();
             // The cron is read from the workflow file ITSELF, so changing the
             // schedule cannot silently desynchronise the detector from the
@@ -124,20 +127,10 @@ jobs:
             try { starts = JSON.parse(process.argv[1]); } catch (e) { starts = null; }
             const r = classifyWindowCoverage({ cronExpr, scheduleRunISOs: starts, nowISO });
             console.log("alarm coverage: " + r.status + " (" + r.reason + "; windows=" + r.windows + " runs=" + r.runs + ", cron=" + cronExpr + ")");
-            const old = classifyRunGap({ previousRunISO: process.argv[2] || null, nowISO });
-            // ⚠️ NOT "informational" — SUPERSEDED, and known wrong in BOTH
-            // directions. At the measured d_max of 12h22m the gap method has no
-            // usable band (worst legitimate 36h22m > smallest true skip 35h38m),
-            // so this line can print FRESH beside a real MISSED_WINDOW and
-            // MISSED_WINDOW beside a healthy run. "Informational" reads as less
-            // authoritative; it does not read as measured-unreliable. Kept only
-            // so the two methods can be compared on real runs while the
-            // replacement earns its keep. Found in review by ref-opus.
-            console.log("alarm gap (old method, SUPERSEDED — band closed 2026-08-30, can be wrong in both directions): " + old.status + " (" + (old.gapHours === null ? "n/a" : old.gapHours.toFixed(1) + "h") + ")");
             if (r.status === "MISSED_WINDOW") console.log("::error::The divergence alarm skipped " + (r.windows - r.runs) + " scheduled window(s) — " + r.runs + " schedule runs for " + r.windows + " windows.");
             if (r.status === "UNKNOWN") console.log("::error::The divergence alarm cannot judge its own window coverage (" + r.reason + ").");
             process.exit(exitCodeFor(r.status));
-          ' "$runs" "$prev"
+          ' "$runs"
 
       - name: Measure unreachable work
         id: measure

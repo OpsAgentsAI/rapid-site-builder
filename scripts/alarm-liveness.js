@@ -40,45 +40,6 @@
 // This module holds the decisions so they are unit-testable; the workflow only
 // moves strings. Same split as check-branch-divergence.js / branch-divergence.test.js.
 
-// The threshold must sit STRICTLY BETWEEN the worst legitimate gap and the
-// SMALLEST real skip. Card oPbduwRM. Both bounds move with the same measured
-// quantity, so exactly one number below is measured and the rest are derived.
-//
-// A daily cron does NOT produce 24h gaps. Each run starts `delay` after its
-// scheduled window, so a gap between two run STARTS carries two delays:
-//
-//     no skip    gap = 24h + d₂ − d₁
-//     one skip   gap = 48h + d₂ − d₁
-//
-// 🔑 THE SIGN, because the first version of this file got it backwards and the
-// error shipped: a delay on the run AFTER (d₂) INCREASES the gap; a delay on the
-// run BEFORE (d₁) DECREASES it. So the two populations are bounded by:
-//
-//     worst LEGITIMATE gap   = 24h + d_max − 0      = 35h19m
-//     smallest TRUE SKIP     = 48h + 0     − d_max  = 36h41m
-//
-// A true skip is therefore NOT ~48h. 48h is a true skip whose preceding run was
-// ON TIME — the easiest one to catch, and the only one the old ceiling described.
-//
-//     usable band = 35h19m ‥ 36h41m      ← 1h22m wide
-//       36h inside? YES, and it is the MIDPOINT (±41 min)
-//       40h inside? NO — above the ceiling, so a real skip reads FRESH
-//
-// ⚠️ THE ±41 MINUTES IS INHERENT AT THIS DELAY VARIANCE — IT IS NOT A TUNING
-// ERROR AND MUST NOT BE "FIXED" BY MOVING THIS NUMBER. It is exactly half the
-// band width; no constant does better. PR #75 read that 41 minutes as slack to
-// be widened, raised this to 40h, and turned a hard-to-reach false RED into an
-// easy-to-reach false GREEN: any real skip whose preceding run was >8h late read
-// FRESH, on a repo that has already produced an 11h19m delay. A false green
-// defeats the parent card (oWtnNDT5), which exists to notice a DEAD alarm.
-//
-// ⚠️ THE BAND NARROWS AS DELAYS GROW, and this constant cannot be re-tuned out
-// of that: at d_max = 12h the two populations meet and gap-vs-threshold stops
-// discriminating at all. At that point the detector needs the EXPECTED WINDOW
-// TIMES rather than the previous run's timestamp. If you find yourself tuning
-// this a second time, that is the signal to change the method, not the number.
-const MISSED_WINDOW_HOURS = 36;
-
 /**
  * THE ONE MEASURED NUMBER. GitHub's worst queue delay this repo has actually
  * produced. Every bound below is derived from it, so raising it moves both
@@ -133,51 +94,18 @@ function heartbeatLine({ ts, event, verdict }) {
   return `last run: ${ts} · trigger: ${event} · verdict: ${verdict}`;
 }
 
-/**
- * Did the alarm miss a window? Answered from its OWN previous run.
- *
- * ⚠️ SCOPE, STATED SO IT IS NOT OVER-READ: this catches an alarm that is
- * SKIPPING — which is the failure mode actually observed here (first window
- * skipped, second delivered 11h19m late). It CANNOT catch an alarm that is
- * completely dead, because a run that never happens runs no check. The card is
- * explicit that a second scheduled workflow must not be used for that (it would
- * share the failure mode), so the dead case is closed by the heartbeat being
- * READABLE, not by this returning red. Said plainly rather than implied.
- */
-function classifyRunGap({ previousRunISO, nowISO, thresholdHours = MISSED_WINDOW_HOURS }) {
-  const now = Date.parse(nowISO);
-  if (!Number.isFinite(now)) throw new Error(`classifyRunGap: unparseable nowISO ${JSON.stringify(nowISO)}`);
-  if (!Number.isFinite(thresholdHours) || thresholdHours <= 0) {
-    throw new Error(`classifyRunGap: thresholdHours must be > 0, got ${JSON.stringify(thresholdHours)}`);
-  }
-
-  // No previous run is NOT a missed window — it is the first one. Reporting a
-  // fresh install as "the alarm is broken" is the cry-wolf direction, and a
-  // guard that is red on day one is the guard that gets deleted.
-  if (previousRunISO === null || previousRunISO === undefined || previousRunISO === '') {
-    return { status: 'FIRST_RUN', gapHours: null };
-  }
-
-  const prev = Date.parse(previousRunISO);
-  if (!Number.isFinite(prev)) {
-    // FAIL CLOSED. Returning FRESH on an unreadable timestamp is precisely the
-    // defect this whole card is about, one level up: a check that cannot answer
-    // must not answer "healthy".
-    return { status: 'UNKNOWN', gapHours: null };
-  }
-
-  const gapHours = (now - prev) / 3_600_000;
-  if (gapHours > thresholdHours) return { status: 'MISSED_WINDOW', gapHours };
-  return { status: 'FRESH', gapHours };
-}
-
 /*
  * ── THE REPLACEMENT METHOD: COUNT WINDOWS, DO NOT MEASURE GAPS ──────────────
- * Card FC3k6ISc. `classifyRunGap` above is kept, exported and tested — a
- * working detector is not deleted to install an unproven one — but it has hit
- * the limit its own comment predicted, and two of the assumptions in the card
- * that proposed the replacement were WRONG. Both were measured 2026-08-30,
- * and recording them is the point:
+ * Card FC3k6ISc; the gap method RETIRED by OynwcCbs. `classifyRunGap` was kept
+ * here — a working detector is not deleted to install an unproven one — until
+ * the replacement earned it. It has: a synthetic SKIPPED window makes
+ * `classifyWindowCoverage` report MISSED_WINDOW (deficit-1) while an all-served
+ * span reports FRESH, so the detector is known to DISCRIMINATE and not merely
+ * known to say FRESH. It is now DELETED rather than left printing a second
+ * verdict beside the live one.
+ *
+ * The measurements that closed its band are kept, because they are WHY the
+ * remedy was deletion rather than a better constant. Both measured 2026-08-30:
  *
  * ❌ "GitHub supplies created_at ≈ the scheduled window." IT DOES NOT.
  *    All 7 runs of this workflow have created_at === run_started_at, INCLUDING
@@ -351,7 +279,8 @@ function classifyWindowCoverage({
   return { status: 'MISSED_WINDOW', reason: `deficit-${windows - runs}`, windows, runs };
 }
 
-/** Exit code for the gap verdict. UNKNOWN is NOT a pass — see classifyRunGap. */
+/** Exit code for the COVERAGE verdict. UNKNOWN is NOT a pass — it means the
+ *  detector could not answer, and an unanswerable check must never read green. */
 function exitCodeFor(status) {
   if (status === 'FRESH' || status === 'FIRST_RUN') return 0;
   if (status === 'MISSED_WINDOW') return 1;
@@ -361,7 +290,6 @@ function exitCodeFor(status) {
 
 module.exports = {
   heartbeatLine,
-  classifyRunGap,
   classifyWindowCoverage,
   parseDailyCron,
   cronFromWorkflow,
@@ -370,7 +298,6 @@ module.exports = {
   CRON_PERIOD_HOURS,
   graceViolation,
   exitCodeFor,
-  MISSED_WINDOW_HOURS,
   MEASURED_WORST_LEGITIMATE_DELAY_HOURS,
   MEASURED_WORST_LEGITIMATE_GAP_HOURS,
   TRUE_SKIP_GAP_HOURS,
