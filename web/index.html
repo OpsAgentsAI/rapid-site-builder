@@ -37,6 +37,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <script src="/i18n.js"></script>
+<script src="/analytics.js" defer></script>
 <style>
 /* OpsAgents Agents Dashboard Design System — tokens (condensed) */
 :root{
@@ -559,6 +560,15 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     setPill('theo', 'w');
     agentsRan.add('theo');
     feed('opsagents_builder_orchestrator', T('dyn.greeting', { business: brief.business || T('dyn.yourbiz') }));
+
+    // Card u4xmePAo — the activation event. Fired at the REQUEST, not at a
+    // successful build: the funnel step being measured is "a visitor asked for
+    // a site", and counting only the builds that finished would hide exactly
+    // the failures this instrumentation exists to find. No PII — category and
+    // style are enum-ish, the free-text brief is never sent.
+    if (window.rsbCapture) window.rsbCapture('site_build_requested', {
+      category: brief.category || '', style: brief.style || '', has_uploads: !!(brief.media && brief.media.length)
+    });
 
     let heroImage = null;
     try {
