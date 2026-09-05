@@ -17,6 +17,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { readFileSync } = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const { join } = require('node:path');
 
 const analytics = require('../lib/analytics');
@@ -30,15 +31,15 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
 test('unset ⇒ disabled, named not-configured, and no key handed out', () => {
   const v = verdictFromEnv({});
-  assert.equal(v.enabled, false);
-  assert.equal(v.reason, REASON.NOT_CONFIGURED);
-  assert.equal(v.projectKey, null);
-  assert.equal(v.apiHost, DEFAULT_API_HOST);
+  assert.strictEqual(v.enabled, false);
+  assert.strictEqual(v.reason, REASON.NOT_CONFIGURED);
+  assert.strictEqual(v.projectKey, null);
+  assert.strictEqual(v.apiHost, DEFAULT_API_HOST);
 });
 
 test('an empty or whitespace value is the same as unset, not a malformed key', () => {
   for (const key of ['', '   ', undefined]) {
-    assert.equal(verdictFromEnv({ [KEY_ENV]: key }).reason, REASON.NOT_CONFIGURED, JSON.stringify(key));
+    assert.strictEqual(verdictFromEnv({ [KEY_ENV]: key }).reason, REASON.NOT_CONFIGURED, JSON.stringify(key));
   }
 });
 
@@ -48,30 +49,30 @@ test('KNOWN-POSITIVE: a personal phx_ key is REFUSED, and refused BY ITS OWN REA
   // Not "malformed" — that would send an operator to fix a typo instead of
   // rotating a leaked account-wide credential.
   const v = verdictFromEnv({ [KEY_ENV]: 'phx_' + 'Z9y8X7w6V5u4T3s2R1q0P9' });
-  assert.equal(v.enabled, false);
-  assert.equal(v.reason, REASON.PERSONAL_KEY_REFUSED);
-  assert.equal(v.projectKey, null, 'a refused key must never be handed to the browser');
+  assert.strictEqual(v.enabled, false);
+  assert.strictEqual(v.reason, REASON.PERSONAL_KEY_REFUSED);
+  assert.strictEqual(v.projectKey, null, 'a refused key must never be handed to the browser');
 });
 
 test('the refusal is not defeated by surrounding whitespace', () => {
   const v = verdictFromEnv({ [KEY_ENV]: '  phx_' + 'Z9y8X7w6V5u4T3s2R1q0P9' + '  ' });
-  assert.equal(v.reason, REASON.PERSONAL_KEY_REFUSED);
+  assert.strictEqual(v.reason, REASON.PERSONAL_KEY_REFUSED);
 });
 
 // ── 3. Shape, including the truncated paste ─────────────────────────────────
 
 test('a well-formed project key enables, and is the value served', () => {
   const v = verdictFromEnv({ [KEY_ENV]: GOOD_KEY });
-  assert.equal(v.enabled, true);
-  assert.equal(v.reason, REASON.ENABLED);
-  assert.equal(v.projectKey, GOOD_KEY);
+  assert.strictEqual(v.enabled, true);
+  assert.strictEqual(v.reason, REASON.ENABLED);
+  assert.strictEqual(v.projectKey, GOOD_KEY);
 });
 
 test('a TRUNCATED key is refused rather than silently dropping every event', () => {
   for (const key of ['phc_', 'phc_short', 'sk-live-not-posthog', 'phc-wrongseparator' + 'x'.repeat(20)]) {
     const v = verdictFromEnv({ [KEY_ENV]: key });
-    assert.equal(v.enabled, false, key);
-    assert.equal(v.reason, REASON.MALFORMED_KEY, key);
+    assert.strictEqual(v.enabled, false, key);
+    assert.strictEqual(v.reason, REASON.MALFORMED_KEY, key);
   }
 });
 
@@ -79,13 +80,13 @@ test('KNOWN-NEGATIVE: the shape test does not reject a legitimate long key', () 
   // The fail-shut direction — a regex tightened until nothing passes is a
   // silent opt-out that looks like a working install.
   const long = 'phc_' + 'a'.repeat(60);
-  assert.equal(verdictFromEnv({ [KEY_ENV]: long }).enabled, true);
+  assert.strictEqual(verdictFromEnv({ [KEY_ENV]: long }).enabled, true);
 });
 
 test('the ingest host is overridable and trailing slashes do not double up', () => {
-  assert.equal(analyticsVerdict({ key: GOOD_KEY, apiHost: 'https://eu.i.posthog.com/' }).apiHost, 'https://eu.i.posthog.com');
-  assert.equal(analyticsVerdict({ key: GOOD_KEY, apiHost: '  ' }).apiHost, DEFAULT_API_HOST);
-  assert.equal(verdictFromEnv({ [KEY_ENV]: GOOD_KEY, [HOST_ENV]: 'https://ph.example.com' }).apiHost, 'https://ph.example.com');
+  assert.strictEqual(analyticsVerdict({ key: GOOD_KEY, apiHost: 'https://eu.i.posthog.com/' }).apiHost, 'https://eu.i.posthog.com');
+  assert.strictEqual(analyticsVerdict({ key: GOOD_KEY, apiHost: '  ' }).apiHost, DEFAULT_API_HOST);
+  assert.strictEqual(verdictFromEnv({ [KEY_ENV]: GOOD_KEY, [HOST_ENV]: 'https://ph.example.com' }).apiHost, 'https://ph.example.com');
 });
 
 // ── 4. NO KEY IS IN THE REPO ────────────────────────────────────────────────
@@ -168,20 +169,87 @@ test('the env template documents both variables and bans the personal key', () =
 
 // ── 6. The served payload ───────────────────────────────────────────────────
 
+test('/api/analytics-config FORWARDS a bound key under the contract field name', () => {
+  // ⭐ AC-3, card 7hUrUOiV. Until now only `verdictFromEnv` was tested with a
+  // good key; nothing proved the ROUTE forwards it, under that field name, on
+  // the real boot path. A rename between verdict and response would have been
+  // invisible — every other test reaches `verdictFromEnv` directly.
+  //
+  // WHY A CHILD PROCESS, not `delete require.cache`:
+  // `lib/analytics` computes `const VERDICT = verdictFromEnv(process.env)` at
+  // MODULE LOAD, so the env must be set before the graph loads. Cache surgery
+  // would need to evict `lib/analytics` AND `server` (which captured its own
+  // reference), re-run server.js's top-level side effects inside this process,
+  // and would leave a real-looking key bound in a shared module registry for
+  // every later test in the file. A child gives exact isolation and exercises
+  // the actual boot, which is the thing under test.
+  const script = `
+    const { app } = require(${JSON.stringify(join(ROOT, 'server.js'))});
+    const server = app.listen(0, async () => {
+      try {
+        const r = await fetch('http://127.0.0.1:' + server.address().port + '/api/analytics-config');
+        process.stdout.write(JSON.stringify(await r.json()));
+      } catch (e) {
+        process.stderr.write(String(e && e.message));
+        process.exitCode = 1;
+      } finally {
+        server.close();
+      }
+    });
+  `;
+  const out = execFileSync(process.execPath, ['-e', script], {
+    env: { ...process.env, [KEY_ENV]: GOOD_KEY },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const body = JSON.parse(out);
+
+  assert.deepStrictEqual(Object.keys(body).sort(), ['apiHost', 'enabled', 'projectKey', 'reason']);
+  assert.strictEqual(body.enabled, true, 'a good key must turn the route ON');
+  assert.strictEqual(body.reason, REASON.ENABLED);
+  // The whole point: the key reaches the browser under THIS name.
+  assert.strictEqual(body.projectKey, GOOD_KEY);
+  assert.strictEqual(body.apiHost, DEFAULT_API_HOST);
+});
+
 test('/api/analytics-config answers disabled-with-a-reason and leaks nothing', async () => {
   const { app } = require('../server');
   const server = app.listen(0);
   try {
     const port = server.address().port;
     const res = await fetch(`http://127.0.0.1:${port}/api/analytics-config`);
-    assert.equal(res.status, 200);
-    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get('cache-control'), 'no-store');
     const body = await res.json();
+
+    // ⭐ THE KEY SET FIRST, and strictly. Card 7hUrUOiV.
+    //
+    // `assert.equal` is loose, and `undefined == null` is TRUE — measured:
+    //   assert.equal(undefined, null)       PASSES
+    //   assert.strictEqual(undefined, null) THROWS
+    // so `assert.equal(body.projectKey, null)` passed just as happily if the
+    // field was DELETED from the response. It was measured: removing
+    // `projectKey:` from server.js's res.json left all 72 tests green.
+    //
+    // `projectKey` is the field web/analytics.js keys on twice — the guard
+    // `if (!cfg || !cfg.enabled || !cfg.projectKey) return` and the init call.
+    // Drop it and analytics is bound, paid for, believed-in, and silently dead.
+    // The suite was asymmetric: PRESENT-and-WRONG was caught (a string is not
+    // `== null`), ABSENT was invisible — and absent is the direction that fails
+    // quietly.
+    //
+    // The key SET, not just strict values, because this is a public endpoint:
+    // it also catches a field ADDED (a leak) as well as one removed.
+    assert.deepStrictEqual(
+      Object.keys(body).sort(),
+      ['apiHost', 'enabled', 'projectKey', 'reason'],
+      'the served contract changed shape — a field was added or removed',
+    );
     // The test process has no key bound, which is also the deployment default.
-    assert.equal(body.enabled, false);
-    assert.equal(body.reason, REASON.NOT_CONFIGURED);
-    assert.equal(body.projectKey, null);
-    assert.equal(body.apiHost, DEFAULT_API_HOST);
+    assert.strictEqual(body.enabled, false);
+    assert.strictEqual(body.reason, REASON.NOT_CONFIGURED);
+    assert.strictEqual(body.projectKey, null);
+    assert.strictEqual(body.apiHost, DEFAULT_API_HOST);
   } finally {
     server.close();
   }
