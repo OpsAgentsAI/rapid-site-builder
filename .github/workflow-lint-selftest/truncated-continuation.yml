@@ -1,0 +1,30 @@
+# FIXTURE — NOT A REAL WORKFLOW. Deliberately kept OUT of .github/workflows/ so
+# GitHub never schedules it. It exists so the `workflows` job in ci.yml can prove,
+# on every run and on the runner it is actually running on, that its linter can
+# still FAIL. See card rFZrx6fL.
+#
+# The defect below is the one that reached PR #57 with `test` and `preview` both
+# SUCCESS and mergeStateStatus CLEAN: a `#` comment placed between two
+# backslash-continued lines. bash splices `\`+newline BEFORE word-splitting, so
+# the `#` opens a comment whose own (unescaped) newline ENDS the command. What
+# runs is the truncated head — `gcloud run deploy … --allow-unauthenticated` —
+# which is a perfectly valid deploy with no --set-env-vars. Per Cloud Run rule
+# #20 that REPLACES the env set, wiping every key on the service.
+#
+# It is not a syntax error. `bash -n` exits 0 on it (measured). Only shellcheck's
+# SC2215, reached through actionlint's run: analysis, sees it.
+name: fixture-truncated-continuation
+on: workflow_dispatch
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The shape that must always be caught
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --allow-unauthenticated \
+            # this comment ends the command; everything below is unreachable
+            --memory 1Gi --min-instances 0 \
+            --set-env-vars "RETIRE_UNGATED=1" \
+            --quiet

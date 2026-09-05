@@ -51,6 +51,18 @@ jobs:
         run: |
           # Arize Phoenix MCP wiring (partner integration) — values stay in
           # Secret Manager; only this runner ever sees them.
-          export ARIZE_MCP_URL="$(gcloud secrets versions access latest --secret=arize-mcp-url --project="$GOOGLE_CLOUD_PROJECT")"
-          export ARIZE_MCP_API_KEY="$(gcloud secrets versions access latest --secret=arize-mcp-api-key --project="$GOOGLE_CLOUD_PROJECT")"
+          # Assign THEN export (SC2155). `export X="$(cmd)"` returns the exit
+          # status of `export`, which always succeeds — so a failed secrets
+          # fetch under `set -e` would sail past with X set to the empty string
+          # and the deploy would run unwired. Split, the failure aborts the step.
+          #
+          # ⭐ This fix has been on `main` since card eKfog19I. It never reached
+          # `real-app` — the auth-ON PRODUCTION branch — because `real-app` has
+          # no workflow linter, which is the gap card K5YgkNtO is about. The
+          # `workflows` job added to ci-realapp.yml in this same PR is what
+          # would have caught it, and does catch it: actionlint on this branch
+          # exits 1 on these two lines today.
+          ARIZE_MCP_URL="$(gcloud secrets versions access latest --secret=arize-mcp-url --project="$GOOGLE_CLOUD_PROJECT")"
+          ARIZE_MCP_API_KEY="$(gcloud secrets versions access latest --secret=arize-mcp-api-key --project="$GOOGLE_CLOUD_PROJECT")"
+          export ARIZE_MCP_URL ARIZE_MCP_API_KEY
           python scripts/deploy_agent_engine.py

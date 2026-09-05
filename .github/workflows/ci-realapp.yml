@@ -15,8 +15,22 @@ name: CI (real-app)
 # Public repo (Apache-2.0): no secrets, no engine/agent IDs, no internal URLs —
 # a plain `node --test` run. Default read-only permissions are sufficient.
 
+# ⚠️ `push:` IS NOT REDUNDANT WITH `pull_request:` HERE — card K5YgkNtO.
+# Measured before this change: merge commit 5473b14d (PR #80, squash-merged into
+# real-app) produced `total_count = 0` workflow runs. NOTHING ran on the merge.
+# `ci-realapp.yml` had no push trigger, `preview.yml` fires on PRs to main, and
+# `deploy-realapp.yml` is dispatch-only — so the post-merge state of the auth-ON
+# PRODUCTION branch was never verified, and a semantic conflict that merges
+# cleanly was invisible.
+#
+# `main`'s ci.yml declares `push: branches:[main, real-app]`, which READS as
+# coverage and is inert: a push event resolves workflow files from the branch
+# being pushed, and `real-app` has no ci.yml at all. A declaration on one branch
+# cannot gate another branch. That clause is corrected separately on `main`.
 on:
   pull_request:
+    branches: [real-app]
+  push:
     branches: [real-app]
 
 permissions:
@@ -35,3 +49,69 @@ jobs:
       - run: npm ci
 
       - run: npm test
+
+  # ── Workflow linting — ported from main's ci.yml (card K5YgkNtO) ────────────
+  # `test` above runs npm test. Nothing on THIS branch has ever parsed a
+  # workflow file, and `deploy-realapp.yml` (9.3 KB) is built around one
+  # enormous backslash-continued `gcloud run deploy` whose --set-env-vars
+  # carries 14 keys, in a run: block dense with `#` comments — the exact shape
+  # that, on main, reached MERGEABLE/CLEAN with every check SUCCESS while
+  # silently truncating the deploy before --set-env-vars (PR #57). Per Cloud Run
+  # rule #20 that REPLACES the env set, so merging it would have wiped all 14
+  # keys including the RETIRE_UNGATED=1 flag that PR existed to protect.
+  #
+  # The guard for that existed only on `main`. real-app is the branch with the
+  # bigger, riskier file and it had none.
+  #
+  # ⭐ It is not decorative here: on the tree as it stood, `actionlint` exited 1
+  # on deploy-engine.yml — an SC2155 masking a failed secrets fetch, whose fix
+  # had been on main for weeks and never crossed. That is fixed in this PR.
+  workflows:
+    name: Lint workflow files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # actionlint's analysis of `run:` blocks IS shellcheck — it shells out to
+      # it. Absent shellcheck, actionlint parses the YAML, finds it well-formed
+      # and EXITS 0 on a truncated deploy script. So its absence is a hard
+      # failure, never a silent downgrade: a green light that checks nothing is
+      # the failure this job exists to catch, one level up.
+      - name: Require shellcheck (actionlint is vacuous without it)
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            echo "::error::shellcheck is not installed on this runner."
+            echo "actionlint would skip every run: block and exit 0 — a guard that cannot fail."
+            exit 1
+          fi
+          shellcheck --version
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          curl -sSfL -o /tmp/download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /usr/local/bin
+          actionlint --version
+
+      # TRUE-NEGATIVE CONTROL, taken BEFORE the real lint and deliberately so. A
+      # linter that reports nothing is indistinguishable from one that is broken
+      # or silently running without its shellcheck half. This asserts the guard
+      # can still FAIL — on this runner, in this run, on the exact defect it
+      # exists for — before its silence on the real workflows means anything.
+      - name: Self-test — the linter must still catch a truncated continuation
+        run: |
+          fixture=.github/workflow-lint-selftest/truncated-continuation.yml
+          test -f "$fixture" || { echo "::error::self-test fixture missing: $fixture"; exit 1; }
+          out=$(actionlint -no-color -oneline "$fixture" || true)
+          echo "$out"
+          case "$out" in
+            *SC2215*) echo "OK: the linter still reports SC2215 on the known-bad shape." ;;
+            *) echo "::error::self-test FAILED — the linter did not flag the known-bad workflow."
+               echo "Do NOT trust a green result from the step below until this is fixed."
+               exit 1 ;;
+          esac
+
+      - name: Lint every workflow
+        run: actionlint -color
