@@ -215,8 +215,11 @@ const CRON = '17 6 * * *';
 const day = (d, h, m) => `2026-08-${String(d).padStart(2, '0')}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`;
 
 test('AC-2: the cron the detector uses is READ FROM the workflow, and they agree', () => {
-  const wf = fs.readFileSync(WF, 'utf8');
-  const fromFile = cronFromWorkflow(wf);
+  // RAW on purpose: this mirrors the workflow's own call, which passes the file
+  // bytes verbatim. The VACUITY GUARD below must NOT use the raw source, or a
+  // prose line is allowed to prove the schedule block exists.
+  const raw = fs.readFileSync(WF, 'utf8');
+  const fromFile = cronFromWorkflow(raw);
   assert.ok(fromFile, 'no cron found in divergence-alarm.yml');
   // VACUITY GUARD: the regex must have found a real schedule, not matched empty.
   assert.match(wf, /schedule:/);
@@ -292,7 +295,14 @@ test('CALL SITE: the workflow actually calls the coverage detector, not just the
   // This repo has already shipped a guard whose logic was right and whose call
   // site was absent (card LEBxGF5d). A correct module nobody invokes is
   // decoration, and the unit tests above cannot tell the difference.
-  const wf = fs.readFileSync(WF, 'utf8');
+  //
+  // ⚠️ MEASURED, card IskyYcTh: this test used to shadow the module-level `wf`
+  // with a RAW read, and the raw read made it VACUOUS. Deleting the real
+  // `classifyWindowCoverage(...)` call from the workflow left the whole file's
+  // 28 tests GREEN, because the word also appears in a prose comment eight
+  // lines above the call. The stripped source is the only one that can tell a
+  // call site from a sentence about a call site — which is exactly what the
+  // module header at the top of this file already said.
   assert.match(wf, /classifyWindowCoverage/, 'the workflow must call the coverage detector');
   assert.match(wf, /cronFromWorkflow/, 'the cron must be read from the workflow file itself');
   assert.match(wf, /event=schedule/, 'only schedule runs serve a window — a dispatch must not mask a dead cron');
@@ -301,9 +311,43 @@ test('CALL SITE: the workflow actually calls the coverage detector, not just the
   // unproven). Card OynwcCbs retired that method, and an assertion that a
   // deleted symbol is still called is the next reader's trap. Flipped, and the
   // absence is proven meaningful by the two live assertions above it.
-  assert.ok(!/classifyRunGap/.test(wf), 'the retired gap method must not be invoked here any more');
+  // ABSENCE stays on the RAW bytes, deliberately, and the asymmetry is the
+  // point: stripping makes a PRESENCE assertion weaker-than-intended and an
+  // ABSENCE assertion stronger. On this repo a workflow comment is a read
+  // surface (card U4bVH6pD), so a retired symbol reappearing in prose SHOULD
+  // red here — a comment claiming the old method is still called is the same
+  // defect as calling it.
+  assert.ok(!/classifyRunGap/.test(wfSrc), 'the retired gap method must not be invoked here any more, in code OR in prose');
   // VACUITY GUARD: prove the file really is the workflow we think it is.
   assert.match(wf, /divergence-alarm/);
+});
+
+test('the comment-stripper DISCRIMINATES — it removes the prose mention and keeps the call', () => {
+  // ⚠️ ANTI-VACUITY FOR THE GUARD ITSELF, card IskyYcTh. Every assertion above
+  // that moved onto `wf` is only worth something if `stripYamlComments` really
+  // does drop prose. A stripper that returned its input unchanged would leave
+  // this file exactly as green as it was while it was vacuous, and a stripper
+  // that returned '' would satisfy every ABSENCE assertion for free. So pin
+  // both directions on the live file.
+  const prose = wfSrc
+    .split('\n')
+    .filter((l) => /^\s*#/.test(l) && /classifyWindowCoverage/.test(l));
+  assert.ok(prose.length > 0,
+    'the live workflow no longer mentions classifyWindowCoverage in a comment — this control is now vacuous; ' +
+    'either restore a prose mention or delete this test, but do not leave it passing on an empty set');
+  for (const line of prose) {
+    assert.ok(!wf.includes(line.trim()), `stripYamlComments left a comment line behind: ${line.trim()}`);
+  }
+  // KNOWN-NEGATIVE: the real call site survives the strip.
+  assert.match(wf, /const r = classifyWindowCoverage\(/,
+    'stripYamlComments ate the call site — it is stripping more than comments');
+  // HONEST BOUND, so nobody over-reads this: the stripper drops WHOLE-comment
+  // lines only. A trailing `# ...` on a code line is not removed, so a mention
+  // parked at the end of a real line would still satisfy a presence assertion.
+  // Not closed here because no such line exists in this workflow today, and a
+  // guard written for a hypothetical is a guard nobody can test.
+  assert.ok(!/^[^#\n]*\S\s+#.*classifyWindowCoverage/m.test(wfSrc),
+    'a trailing-comment mention of the detector now exists — the stripper cannot see it, so close that hole');
 });
 
 test('LIVE DATA, and a correction to my own first reading of it', () => {
@@ -409,11 +453,18 @@ test('the SUPERSEDED gap method is GONE from the alarm — one verdict, not two'
   // A test that pins a deleted behaviour is the next reader's trap, so it asserts
   // the ABSENCE instead — with the vacuity guard below, because "the string is
   // gone" is also true of a workflow that no longer exists or was never read.
-  const wf = fs.readFileSync(WF, 'utf8');
-  assert.ok(!/classifyRunGap/.test(wf), 'the retired gap method must not be called by the alarm');
-  assert.ok(!/alarm gap \(old method/.test(wf), 'the second verdict line must be gone');
-  assert.ok(!/SUPERSEDED — band closed/.test(wf), 'the superseded label goes with the method it labelled');
-  // VACUITY: the file was actually read and still contains the live detector.
+  //
+  // ABSENCE over the RAW bytes: prose counts. A comment that still says the old
+  // method is reported alongside is the defect this card was filed for, and it
+  // is invisible to a stripped source.
+  assert.ok(!/classifyRunGap/.test(wfSrc), 'the retired gap method must not be called by the alarm');
+  assert.ok(!/alarm gap \(old method/.test(wfSrc), 'the second verdict line must be gone');
+  assert.ok(!/SUPERSEDED — band closed/.test(wfSrc), 'the superseded label goes with the method it labelled');
+  assert.ok(!/kept alongside and REPORTED/.test(wfSrc), 'card IskyYcTh: the orphaned first line of the retired method\u2019s comment is back — it says the old detector is kept and reported, one line above the line saying it is gone');
+  // VACUITY, over the STRIPPED source: the file was actually read and still
+  // CALLS the live detector. Over the raw source this guard passed even with
+  // the call deleted (measured, card IskyYcTh) — a vacuity guard that a comment
+  // can satisfy guards nothing.
   assert.match(wf, /classifyWindowCoverage/, 'the workflow no longer calls the coverage detector either — the absence above proves nothing');
   assert.match(wf, /alarm coverage: /, 'the surviving verdict line is missing');
 });
