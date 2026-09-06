@@ -106,7 +106,6 @@ jobs:
           # counting one would let a human pressing the button hide a dead cron.
           runs=$(gh api "repos/${{ github.repository }}/actions/workflows/divergence-alarm.yml/runs?per_page=100&event=schedule" \
                    --jq '[.workflow_runs[].run_started_at]' || echo 'null')
-          # per_page=2 for the OLD detector, kept alongside and REPORTED, not
           # Card OynwcCbs: the superseded gap method is GONE. It used to print a
           # SECOND verdict beside this one, and a retired method that still speaks
           # is worse than a deleted one -- two lines, two answers, and the reader
