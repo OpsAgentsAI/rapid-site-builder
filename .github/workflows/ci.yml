@@ -11,11 +11,38 @@ name: CI
 # with ZERO checks: it is the auth-ON production branch (cutover ns341yIF) and
 # must never merge untested (card I3WuY6w1).
 
+# ⚠️ `real-app` IS DELIBERATELY ABSENT FROM BOTH LISTS — card ypwU6ylp.
+#
+# It used to appear in both, and BOTH were inert. A workflow file is resolved
+# from the branch that owns the event, and `real-app` has no `ci.yml` at all —
+# its workflow directory is ci-realapp.yml · deploy-engine.yml ·
+# deploy-realapp.yml · deploy.yml · preview.yml.
+#
+#   push to real-app          resolves workflows from real-app  -> this file never runs
+#   pull_request INTO real-app resolves from the BASE branch, which IS real-app
+#                              -> this file never runs either
+#
+# MEASURED, not reasoned: PR #82 (base `real-app`, head 3348cad7) produced
+# exactly ONE workflow run — `CI (real-app)`, path
+# `.github/workflows/ci-realapp.yml`. This file did not run. The parent card
+# expected the pull_request half to work "because a PR resolves from the base
+# branch" — the mechanism is right and the conclusion inverted: the base branch
+# IS real-app.
+#
+# ⭐ AND IT IS INVISIBLE AT THE CHECK LEVEL. ci-realapp.yml emits the SAME two
+# check names this file does — `test` and `Lint workflow files` — so a reader
+# looking at a real-app PR sees the checks they expected and concludes this
+# workflow ran. Only the run's name/path distinguishes them. That is why a
+# clause naming a branch it cannot reach survived: it was never contradicted.
+#
+# real-app IS gated — by its own ci-realapp.yml, which carries `push:
+# branches:[real-app]` (card K5YgkNtO, verified total_count 0 -> 1 on the merge
+# commit). Re-adding real-app here does not add a gate; it re-adds the claim.
 on:
   pull_request:
-    branches: [main, real-app]
+    branches: [main]
   push:
-    branches: [main, real-app]
+    branches: [main]
 
 permissions:
   contents: read
