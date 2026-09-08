@@ -157,4 +157,4 @@ jobs:
           echo "commit  : $SHA"
           echo "expected: $EXPECTED (ancestry verified by the ref guard at the top of this job)"
           echo "crew    : $(git log -1 --format='%h %ci %s' -- agents/ scripts/deploy_agent_engine.py)"
-          echo "Pin the RESOURCE_NAME printed above together with this commit.
+          echo "Pin the RESOURCE_NAME printed above together with this commit."
