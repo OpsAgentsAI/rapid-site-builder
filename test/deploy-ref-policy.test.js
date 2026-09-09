@@ -74,7 +74,7 @@ const DEPLOY_VERBS =
  * REDS until this table is updated — so closing the gap cannot be done
  * quietly, and neither can widening it.
  */
-const GUARDED = new Set(['deploy-engine.yml']);
+const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml']);
 
 /**
  * Not yet guarded ON THIS BRANCH, measured 2026-09-08.
@@ -86,7 +86,7 @@ const GUARDED = new Set(['deploy-engine.yml']);
  * separately; it is out of scope here only because this PR keeps one workflow
  * per change.
  */
-const UNGUARDED_ON_THIS_BRANCH = ['deploy-realapp.yml', 'deploy.yml'];
+const UNGUARDED_ON_THIS_BRANCH = ['deploy.yml'];
 
 test('the UNGUARDED set is exactly what we think — closing the gap cannot be silent', () => {
   const rows = Object.keys(DEPLOY_REF_POLICY).sort();
@@ -393,15 +393,29 @@ test('the guard is the FIRST thing the deploying job does after checkout', () =>
   }
 });
 
-test('lib/realappRefGuard.js is ABSENT on this branch — and that is the gap, not an oversight', () => {
-  // main carries it as PR #67's call site for deploy-realapp.yml's guard. That
-  // guard is not on this branch (see UNGUARDED_ON_THIS_BRANCH), so the module
-  // would be dead code here. Asserted rather than assumed: if someone ports
-  // the PROD guard across, this REDS and forces them to bring the module and
-  // to move deploy-realapp.yml into GUARDED in the same change.
+test('lib/realappRefGuard.js is STILL absent — ONE policy module on this branch, deliberately', () => {
+  // ⚠️ THE ASSERTION IS UNCHANGED; ITS REASON IS NOT, and the distinction is the
+  // point. Previously this said "the guard is not on this branch, so the module
+  // would be dead code". Card 22I0yUum ported the PROD guard here, so that
+  // sentence is now FALSE while the assertion below is still TRUE — for a
+  // different reason, and one worth writing down rather than leaving a passing
+  // test with a stale justification.
+  //
+  // 22I0yUum's AC-1 named realappRefGuard.js, written before PR #84's shape was
+  // visible. #84 landed lib/deployRefPolicy.js here first, and deploy-engine.yml
+  // already calls it, so the guard reuses that module. Porting realappRefGuard.js
+  // as well would put TWO policy modules on one branch serving the same call
+  // sites — the duplication this card series exists to shrink. The AC was
+  // amended on the card with that reasoning.
+  //
+  // So this now guards a different property: not "the gap is still open" but
+  // "the gap was closed WITHOUT growing a second source of truth". If someone
+  // later ports the module across, this REDS and asks them to justify two.
   const at = path.join(REPO, 'lib', 'realappRefGuard.js');
   assert.equal(fs.existsSync(at), false,
-    'lib/realappRefGuard.js appeared — port deploy-realapp.yml\'s guard with it and update GUARDED');
+    'lib/realappRefGuard.js appeared — this branch deliberately has ONE policy module ' +
+    '(deployRefPolicy.js, which deploy-engine.yml and deploy-realapp.yml both call). ' +
+    'If a second is genuinely needed, say why on card 22I0yUum first.');
   // ...and the one decision that IS here is the shared one, not a copy.
   const src = fs.readFileSync(path.join(REPO, 'lib', 'deployRefPolicy.js'), 'utf8');
   assert.match(src, /function\s+refDeployVerdict/, 'the decision must live in deployRefPolicy.js on this branch');
@@ -516,4 +530,126 @@ test('THE ENGINE ROW IS A MEASUREMENT: agents/ on real-app is behind main', () =
       'An engine minted from the ref this policy names would be missing crew code, and its ' +
       'RESOURCE_NAME would then be pinned into the app env. Re-decide the row deliberately.',
   );
+});
+
+// ── 6. THE PROVENANCE RECORD MUST NOT OUTRANK THE GUARD (cards 22I0yUum / QpERt8db)
+//
+// A provenance block that prints "ancestry verified by the ref guard" on a run
+// where the guard REFUSED is an authoritative-looking record that is not true —
+// the same harm eKfog19I was filed about, one level down. QpERt8db measured it
+// live on deploy-engine.yml (run 34322710482): the guard refused, steps 4-8
+// skipped, nothing was minted, and the `if: always()` record still printed a
+// commit and the words "ancestry verified".
+//
+// ⚠️ THIS SET IS DELIBERATELY NOT `GUARDED`. deploy-engine.yml carries the
+// defect today and fixing it is QpERt8db's scope, not this card's — a loop over
+// GUARDED here would red the build for someone else's open bug. When QpERt8db
+// lands, add 'deploy-engine.yml' to this list; that is the whole change, and
+// this comment is the instruction.
+const PROVENANCE_READS_GUARD = ['deploy-realapp.yml'];
+
+test('a provenance record reads the guard OUTCOME — it never asserts verification unconditionally', () => {
+  for (const file of PROVENANCE_READS_GUARD) {
+    const s = readWf(file);
+    // The guard must be addressable, or the record cannot consult it.
+    assert.match(s, /^\s+id:\s*refguard\s*$/m, `${file}: the ref-guard step needs an id: for the record to read`);
+    assert.match(
+      s,
+      /steps\.refguard\.outcome/,
+      `${file}: the provenance record must read steps.refguard.outcome, not assume the guard passed`,
+    );
+    // The claim itself must be downstream of a check on that outcome.
+    const claim = s.indexOf('ancestry');
+    assert.ok(claim > -1, `${file}: no ancestry line in the record at all`);
+    const gate = s.search(/if \[ "\$GUARD" != "success" \]/);
+    assert.ok(gate > -1, `${file}: the record does not branch on the guard outcome`);
+    assert.ok(
+      gate < claim,
+      `${file}: the "ancestry verified" claim is printed BEFORE the guard-outcome check — ` +
+        `that is exactly the QpERt8db defect`,
+    );
+  }
+});
+
+test('on a refused run the record prints no commit line — a receipt for a deploy that did not happen', () => {
+  for (const file of PROVENANCE_READS_GUARD) {
+    const s = readWf(file);
+    const gate = s.search(/if \[ "\$GUARD" != "success" \]/);
+    const commit = s.search(/echo "commit\s/);
+    assert.ok(commit > -1, `${file}: the record never prints a commit at all`);
+    assert.ok(
+      gate < commit,
+      `${file}: the commit line is printed before the guard-outcome branch, so a REFUSED run ` +
+        `still emits something that reads like a deploy receipt`,
+    );
+    // …and the refusal path must exit before reaching it.
+    assert.match(s, /RESULT\s*:\s*REFUSED/, `${file}: the refused path must say so in words`);
+    assert.match(s, /exit 0/, `${file}: the refused path must end the step without failing the record itself`);
+  }
+});
+
+test('the record still runs on a failed/refused dispatch — always() is not traded away', () => {
+  // QpERt8db's rail: do NOT fix the false wording by dropping always(). That
+  // swaps a false record for NO record on precisely the runs it exists to serve.
+  for (const file of PROVENANCE_READS_GUARD) {
+    assert.match(readWf(file), /if:\s*always\(\)/, `${file}: the provenance step lost its always()`);
+  }
+});
+
+// ── 7. AC-4's KNOWN-POSITIVE — the direction a refusing guard never proves ───
+//
+// "A guard shown only refusing has not been shown to permit anything." Every
+// real-git test above exercises the REFUSE direction. On a PROD rail that is
+// the cheap half: a guard that refuses everything is perfectly safe and
+// perfectly useless, and it would pass all of them.
+//
+// This cannot be discharged by dispatching — the workflow deploys PROD
+// (Cloud Run + update-traffic --to-latest + Firebase Hosting), and the card's
+// rails forbid a lane dispatching it to test. What CAN be done without any
+// deploy is to run the SHIPPED decision over the SAME git question the workflow
+// asks, on real refs, and assert it ALLOWS. That is the whole guard minus the
+// gcloud calls.
+test('KNOWN-POSITIVE: a dispatch ON the expected ref is ALLOWED, on real git state', () => {
+  const p = DEPLOY_REF_POLICY['deploy-realapp.yml'];
+  const expected = resolve(p.expectedRef);
+  if (!expected) {
+    console.log(`SKIP: need ${p.expectedRef} locally (shallow clone?)`);
+    return;
+  }
+
+  // (a) The literal legitimate dispatch: HEAD is the branch tip, so the tip is
+  //     trivially an ancestor of itself — exit 0.
+  const atTip = spawnSync('git', ['merge-base', '--is-ancestor', expected, expected], { cwd: REPO }).status;
+  assert.equal(atTip, 0, 'the expected ref is not an ancestor of itself — git is not answering');
+  const vTip = refDeployVerdict(atTip, { dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier });
+  assert.equal(vTip.allow, true, `a dispatch on ${p.expectedRef} was REFUSED: ${vTip.message}`);
+
+  // (b) …and not only by equality. An earlier commit on the same line is a
+  //     genuine ancestor, so the allow path is reachable for a real range of
+  //     refs and not just the degenerate one.
+  const parent = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${expected}~1`], { cwd: REPO });
+  if (parent.status === 0) {
+    const sha = parent.stdout.toString().trim();
+    const rc = spawnSync('git', ['merge-base', '--is-ancestor', sha, expected], { cwd: REPO }).status;
+    assert.equal(rc, 0, 'a parent commit is not an ancestor of its own branch tip — git is not answering');
+    const v = refDeployVerdict(rc, { dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier });
+    assert.equal(v.allow, true, `a genuine ancestor of ${p.expectedRef} was REFUSED: ${v.message}`);
+  }
+});
+
+test('KNOWN-POSITIVE CONTROL: the same decision still REFUSES the dangerous ref', () => {
+  // Without this arm the test above is satisfied by a decision that allows
+  // everything — which is the failure mode a PROD guard must never have.
+  const p = DEPLOY_REF_POLICY['deploy-realapp.yml'];
+  const expected = resolve(p.expectedRef);
+  const dangerous = resolve('main');
+  if (!expected || !dangerous) {
+    console.log('SKIP: need both refs locally (shallow clone?)');
+    return;
+  }
+  const rc = spawnSync('git', ['merge-base', '--is-ancestor', dangerous, expected], { cwd: REPO }).status;
+  assert.equal(rc, 1, 'main IS an ancestor of the deploy line — the branches have converged, re-read this test');
+  const v = refDeployVerdict(rc, { dispatchedRef: 'main', expectedRef: p.expectedRef, tier: p.tier });
+  assert.equal(v.allow, false, 'a dispatch on main was ALLOWED onto the PROD surface');
+  assert.match(v.message, new RegExp(p.expectedRef), 'the refusal must name the ref to re-dispatch with');
 });
