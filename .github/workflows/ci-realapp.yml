@@ -40,7 +40,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is LOAD-BEARING, not a nicety (card OtEgCdjR).
+      # test/deploy-ref-policy.test.js ends with two assertions that read REAL
+      # git history — "real-app is genuinely not on the main line" and "agents/
+      # on real-app is behind main". On a depth-1 clone the runner has no `main`
+      # ref, so both print `SKIP: need both main and real-app (shallow clone?)`
+      # and PASS. That already happened once on run 32849680329 in the sibling
+      # repo: three green ticks measuring nothing, on the exact assertion the
+      # cards call the point of the exercise. The SKIP itself is correct — a
+      # fork or a shallow local checkout must not be red for an environment
+      # reason — so the depth is asserted in that test file instead, where
+      # removing this line reds loudly.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

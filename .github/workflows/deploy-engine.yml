@@ -25,7 +25,76 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth (checkout clean:true wipes the creds file)
+      #
+      # fetch-depth: 0 is LOAD-BEARING for the ref guard below, not a nicety.
+      # The default depth-1 clone has no history and no `main` ref, so
+      # `merge-base --is-ancestor` exits 128 and the guard aborts every dispatch
+      # — including correct ones. Card eKfog19I; a test asserts this value.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── REF GUARD (cards eKfog19I / OtEgCdjR) — BEFORE auth, BEFORE deploy ──
+      # This workflow is dispatch-only and mints a **NEW** engine every run
+      # rather than updating one, then prints a RESOURCE_NAME a human pins into
+      # the app's env. So a stale-ref dispatch does not merely deploy wrong: it
+      # hands you an identifier that looks authoritative.
+      #
+      # ⭐ WHY THIS BLOCK IS ON `real-app` AND NOT ONLY ON `main` (card OtEgCdjR).
+      # `workflow_dispatch` resolves the workflow FILE from the ref the operator
+      # picks. So main's copy of this guard only ever runs on a dispatch from
+      # main — the one ref it would allow. A dispatch from `real-app` ran THIS
+      # file, which had no guard at all, and minted an engine from a branch
+      # whose crew is three sub-agents short. A guard that lives only on the
+      # ref it permits cannot refuse anything.
+      #
+      # `main` owns the crew definition — RE-MEASURED 2026-09-08 for this
+      # branch rather than copied from main's row:
+      #     agents/ diff real-app..main   +156 / -3   (agent.py, tools.py)
+      #     Dana/Remy/Kai sub-agents      main 12 matches · real-app 0
+      #     last touched agents/          main e79c7b7 2026-08-07
+      #                                   real-app 308dae6 2026-06-14
+      #     ancestry                      neither branch is an ancestor of the
+      #                                   other, so a real-app dispatch REFUSES
+      # ⚠️ That last line is the point, and it is intended: with this guard in
+      # place, dispatching this workflow from `real-app` is refused with the
+      # message naming `main`. Engines are minted from `main` only.
+      #
+      # ⚠️ main's policy row says real-app last touched agents/ on 2026-07-20.
+      # Measured today it is 2026-06-14 (308dae6) — real-app is ~3 months
+      # behind, not ~6 weeks. The row's conclusion is unchanged and stronger;
+      # the date is corrected in lib/deployRefPolicy.js in this same commit.
+      #
+      # No `if:` — this workflow has no trigger other than workflow_dispatch, so
+      # every run of it is the case the guard is for. (And a job-level `if:`
+      # would make every `needs:` job skip while the run shows no failure.)
+      - name: Refuse a dispatch on any ref that is not on the main line
+        # REF_NAME goes through env:, never inline `${{ }}` in the run: body —
+        # a branch name may legally contain `$`, backticks and parentheses.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-engine.yml'].expectedRef")
+          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
+            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
+            || true
+          # `|| rc=$?` is LOAD-BEARING: GitHub runs this under `bash -e`, so a
+          # bare `--is-ancestor` returning 1 aborts the step before the message
+          # naming the right ref is ever printed.
+          rc=0
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
+          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
+          RC="$rc" node -e '
+            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["deploy-engine.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+            });
+            console.log(v.message);
+            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+          '
 
       - uses: google-github-actions/auth@v2
         with:
@@ -66,3 +135,26 @@ jobs:
           ARIZE_MCP_API_KEY="$(gcloud secrets versions access latest --secret=arize-mcp-api-key --project="$GOOGLE_CLOUD_PROJECT")"
           export ARIZE_MCP_URL ARIZE_MCP_API_KEY
           python scripts/deploy_agent_engine.py
+
+      # ── PROVENANCE (cards eKfog19I / OtEgCdjR) ─────────────────────────────
+      # The guard above already refuses an off-line ref, so this cannot be the
+      # only defence — it is the half the card asks for explicitly: the
+      # RESOURCE_NAME printed by the step above is copied by a human into the
+      # app's env, and until now it arrived with NO indication of which commit
+      # produced it. A bare engine id is unfalsifiable after the fact.
+      #
+      # `if: always()` so a FAILED deploy still records what it was built from —
+      # that is exactly when someone goes looking.
+      - name: Record what the engine above was minted from
+        if: always()
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-engine.yml'].expectedRef")
+          echo "--- engine provenance (card eKfog19I) ---"
+          echo "ref     : $REF_NAME"
+          echo "commit  : $SHA"
+          echo "expected: $EXPECTED (ancestry verified by the ref guard at the top of this job)"
+          echo "crew    : $(git log -1 --format='%h %ci %s' -- agents/ scripts/deploy_agent_engine.py)"
+          echo "Pin the RESOURCE_NAME printed above together with this commit."
