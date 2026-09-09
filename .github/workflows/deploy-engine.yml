@@ -69,6 +69,11 @@ jobs:
       # every run of it is the case the guard is for. (And a job-level `if:`
       # would make every `needs:` job skip while the run shows no failure.)
       - name: Refuse a dispatch on any ref that is not on the main line
+        # Card QpERt8db: the PROVENANCE step below reads this step's outcome by
+        # id. Without the id it asserted "ancestry verified" unconditionally,
+        # which is false on 100% of real-app dispatches (the guard can only
+        # refuse here) — an authoritative record of a mint that never happened.
+        id: refguard
         # REF_NAME goes through env:, never inline `${{ }}` in the run: body —
         # a branch name may legally contain `$`, backticks and parentheses.
         env:
@@ -150,11 +155,39 @@ jobs:
         env:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          # Card QpERt8db. `outcome`, not `conclusion`: outcome is the step's
+          # own result before continue-on-error is applied. The guard carries no
+          # continue-on-error today, so they agree — reading outcome keeps that
+          # true if one is ever added.
+          REFGUARD: ${{ steps.refguard.outcome }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-engine.yml'].expectedRef")
           echo "--- engine provenance (card eKfog19I) ---"
-          echo "ref     : $REF_NAME"
-          echo "commit  : $SHA"
-          echo "expected: $EXPECTED (ancestry verified by the ref guard at the top of this job)"
-          echo "crew    : $(git log -1 --format='%h %ci %s' -- agents/ scripts/deploy_agent_engine.py)"
-          echo "Pin the RESOURCE_NAME printed above together with this commit."
+          # THREE states, never two. A step that was cancelled or skipped is not
+          # a refusal and is certainly not a verification — and a timed-out job
+          # concludes `cancelled`, so "not success" and "refused" are different
+          # facts. Only `success` may claim ancestry was verified.
+          case "$REFGUARD" in
+            success)
+              echo "ref check: VERIFIED — HEAD is an ancestor of $EXPECTED"
+              echo "ref     : $REF_NAME"
+              echo "commit  : $SHA"
+              echo "expected: $EXPECTED"
+              echo "crew    : $(git log -1 --format='%h %ci %s' -- agents/ scripts/deploy_agent_engine.py)"
+              echo "Pin the RESOURCE_NAME printed above together with this commit."
+              ;;
+            failure)
+              echo "ref check: REFUSED — NO ENGINE WAS MINTED from this run."
+              echo "dispatched ref   : $REF_NAME"
+              echo "dispatched commit: $SHA"
+              echo "expected ref     : $EXPECTED"
+              echo "This run produced no RESOURCE_NAME. Do not pin anything from it."
+              ;;
+            *)
+              echo "ref check: UNKNOWN (guard outcome: '$REFGUARD') — cannot state whether ancestry was verified."
+              echo "dispatched ref   : $REF_NAME"
+              echo "dispatched commit: $SHA"
+              echo "expected ref     : $EXPECTED"
+              echo "Treat this run as UNVERIFIED. Do not pin a RESOURCE_NAME from it."
+              ;;
+          esac
