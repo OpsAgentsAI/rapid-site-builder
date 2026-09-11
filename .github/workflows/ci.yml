@@ -1,0 +1,141 @@
+name: CI
+
+# Gates every PR to a long-lived branch (main, real-app) on the unit/integration
+# suite. preview.yml only deploys a Hosting preview channel and smoke-tests
+# /board + /api/health — it never runs `npm test`, so backend PRs touching
+# lib/*.js (e.g. the uploads hardening in #17/#18) could merge green without
+# their tests ever executing. This job closes that gap: zero-dep `node --test`
+# runs in seconds. Mark it a required status check in branch protection so a red
+# suite blocks merge (rule #22: the merge gate is green CI on the head SHA —
+# that "green" must include the tests). real-app was added after PR #40 merged
+# with ZERO checks: it is the auth-ON production branch (cutover ns341yIF) and
+# must never merge untested (card I3WuY6w1).
+
+# ⚠️ `real-app` IS DELIBERATELY ABSENT FROM BOTH LISTS — card ypwU6ylp.
+#
+# It used to appear in both, and BOTH were inert. A workflow file is resolved
+# from the branch that owns the event, and `real-app` has no `ci.yml` at all —
+# its workflow directory is ci-realapp.yml · deploy-engine.yml ·
+# deploy-realapp.yml · deploy.yml · preview.yml.
+#
+#   push to real-app          resolves workflows from real-app  -> this file never runs
+#   pull_request INTO real-app resolves from the BASE branch, which IS real-app
+#                              -> this file never runs either
+#
+# MEASURED, not reasoned: PR #82 (base `real-app`, head 3348cad7) produced
+# exactly ONE workflow run — `CI (real-app)`, path
+# `.github/workflows/ci-realapp.yml`. This file did not run. The parent card
+# expected the pull_request half to work "because a PR resolves from the base
+# branch" — the mechanism is right and the conclusion inverted: the base branch
+# IS real-app.
+#
+# ⭐ AND IT IS INVISIBLE AT THE CHECK LEVEL. ci-realapp.yml emits the SAME two
+# check names this file does — `test` and `Lint workflow files` — so a reader
+# looking at a real-app PR sees the checks they expected and concludes this
+# workflow ran. Only the run's name/path distinguishes them. That is why a
+# clause naming a branch it cannot reach survived: it was never contradicted.
+#
+# real-app IS gated — by its own ci-realapp.yml, which carries `push:
+# branches:[real-app]` (card K5YgkNtO, verified total_count 0 -> 1 on the merge
+# commit). Re-adding real-app here does not add a gate; it re-adds the claim.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # ⚠️ fetch-depth: 0 IS LOAD-BEARING, NOT A NICETY (card eKfog19I).
+      # Three tests answer the deploy-ref question against the REAL refs rather
+      # than a fixture — cards LEBxGF5d and eKfog19I both require a negative
+      # test on a genuinely wrong ref, because an assertion never shown to fire
+      # is not a guard. They skip LOUDLY (and pass) when the refs are absent, so
+      # that a fork or a shallow local clone is not red for an environment
+      # reason. Measured on run 32849680329: under the default depth-1 checkout
+      # all three printed `SKIP: need both main and real-app` and passed on
+      # nothing. The graceful skip is right; being permanently in it is not.
+      # test/deploy-ref-policy.test.js asserts this value, so removing it reds
+      # here instead of silently re-emptying those three tests.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # ── Workflow linting (card rFZrx6fL) ────────────────────────────────────────
+  # `test` above runs npm test. Nothing in this repo has ever PARSED a workflow
+  # file, and deploy.yml only fires on push to main — so its first execution is
+  # the production deploy. PR #57 reached MERGEABLE/CLEAN with `test` and
+  # `preview` both SUCCESS while carrying a `#` comment between two
+  # backslash-continued lines, which silently truncated `gcloud run deploy`
+  # before --set-env-vars. Per Cloud Run rule #20 that REPLACES the env set:
+  # merging it would have wiped all 14 keys on rapid-builder-proxy, including
+  # the RETIRE_UNGATED=1 flag that same PR existed to protect.
+  workflows:
+    name: Lint workflow files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # actionlint's analysis of `run:` blocks IS shellcheck — it shells out to
+      # it. With shellcheck absent or disabled, actionlint parses the YAML,
+      # finds the workflow well-formed and EXITS 0 on the truncated-deploy
+      # script above. Measured, not assumed: `actionlint -shellcheck=` on PR
+      # #57's own head exits 0. shellcheck ships on ubuntu-latest today, but a
+      # runner-image change that dropped it would turn this job into a green
+      # light that checks nothing — the exact failure it was built to catch, one
+      # level up. So its absence is a hard failure, never a silent downgrade.
+      - name: Require shellcheck (actionlint is vacuous without it)
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            echo "::error::shellcheck is not installed on this runner."
+            echo "actionlint would skip every run: block and exit 0 — a guard that cannot fail."
+            exit 1
+          fi
+          shellcheck --version
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          curl -sSfL -o /tmp/download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash /tmp/download-actionlint.bash "$ACTIONLINT_VERSION" /usr/local/bin
+          actionlint --version
+
+      # TRUE-NEGATIVE CONTROL, taken BEFORE the real lint and deliberately so.
+      # A linter that reports nothing is indistinguishable from a linter that is
+      # broken, mis-configured, or silently running without its shellcheck half.
+      # This asserts the guard can still FAIL — on this runner, in this run, on
+      # the exact defect it exists for — before its silence on the real
+      # workflows is allowed to mean anything.
+      - name: Self-test — the linter must still catch a truncated continuation
+        run: |
+          fixture=.github/workflow-lint-selftest/truncated-continuation.yml
+          test -f "$fixture" || { echo "::error::self-test fixture missing: $fixture"; exit 1; }
+          out=$(actionlint -no-color -oneline "$fixture" || true)
+          echo "$out"
+          case "$out" in
+            *SC2215*) echo "OK: the linter still reports SC2215 on the known-bad shape." ;;
+            *) echo "::error::self-test FAILED — the linter did not flag the known-bad workflow."
+               echo "Do NOT trust a green result from the step below until this is fixed."
+               exit 1 ;;
+          esac
+
+      - name: Lint every workflow
+        run: actionlint -color
+

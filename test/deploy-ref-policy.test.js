@@ -61,47 +61,6 @@ const DEPLOY_VERBS =
   /gcloud run deploy|gcloud builds submit|firebase deploy|deploy_agent_engine\.py|hosting:channel:deploy/;
 
 /**
- * ⚠️ THIS FILE IS THE `real-app` COPY. Card OtEgCdjR.
- *
- * `workflow_dispatch` resolves the workflow FILE from the ref the operator
- * picks, so a guard only ever runs on the branch it is committed to. main's
- * copies therefore guard main's dispatches and nothing else. This branch is
- * being brought up one workflow at a time, and the split is written down
- * rather than left as a shape the suite silently tolerates.
- *
- * GUARDED may only GROW. When a workflow moves across, its own tests below
- * start applying to it and `the UNGUARDED set is exactly what we think`
- * REDS until this table is updated — so closing the gap cannot be done
- * quietly, and neither can widening it.
- */
-const GUARDED = new Set(['deploy-engine.yml']);
-
-/**
- * Not yet guarded ON THIS BRANCH, measured 2026-09-08.
- *
- * ⚠️ `deploy-realapp.yml` is the PROD rail and its policy expectedRef IS
- * `real-app` — so the guard main carries for it can only ever run on a ref it
- * would refuse, and every legitimate PROD dispatch runs THIS unguarded copy.
- * That is a wider hole than the one card OtEgCdjR closes and is filed
- * separately; it is out of scope here only because this PR keeps one workflow
- * per change.
- */
-const UNGUARDED_ON_THIS_BRANCH = ['deploy-realapp.yml', 'deploy.yml'];
-
-test('the UNGUARDED set is exactly what we think — closing the gap cannot be silent', () => {
-  const rows = Object.keys(DEPLOY_REF_POLICY).sort();
-  assert.deepEqual([...GUARDED, ...UNGUARDED_ON_THIS_BRANCH].sort(), rows,
-    'every policy row must be either guarded here or listed as a known gap');
-  for (const f of UNGUARDED_ON_THIS_BRANCH) {
-    assert.doesNotMatch(readWf(f), /refDeployVerdict/,
-      `${f} now calls the guard — move it into GUARDED and delete it from the gap list`);
-  }
-  for (const f of GUARDED) {
-    assert.match(readWf(f), /refDeployVerdict/, `${f} is listed as guarded but does not call the guard`);
-  }
-});
-
-/**
  * Every workflow that is BOTH dispatchable and deploys something.
  * Discovered from disk, deliberately, never listed here.
  */
@@ -202,12 +161,10 @@ test('THE CARD\'S OWN SELF-CATCH: triggers are counted with comments STRIPPED', 
   // `workflow_dispatch` and hit the TIER-MAP COMMENT describing a DIFFERENT
   // file's trigger. deploy.yml is genuinely dispatchable, so the conclusion
   // survived — by luck, holding the right answer for the wrong reason.
-  // Re-pointed to deploy-engine.yml: on THIS branch that is the file whose
-  // comments discuss its own trigger, so it is where the trap reproduces.
-  const rawDeploy = fs.readFileSync(path.join(WF_DIR, 'deploy-engine.yml'), 'utf8');
+  const rawDeploy = fs.readFileSync(path.join(WF_DIR, 'deploy.yml'), 'utf8');
   assert.ok(
     /^\s*#.*workflow_dispatch/m.test(rawDeploy),
-    'deploy-engine.yml no longer carries a commented workflow_dispatch — ' +
+    'deploy.yml no longer carries the comment that produced the miscount — ' +
       'if it was removed, this test is no longer reproducing the trap and should be re-pointed',
   );
   // The miscount, reproduced as arithmetic rather than described: a whole-file
@@ -216,20 +173,14 @@ test('THE CARD\'S OWN SELF-CATCH: triggers are counted with comments STRIPPED', 
   // trap and the assertion below is measuring nothing.
   const wholeFileHits = (rawDeploy.match(/workflow_dispatch/g) || []).length;
   const onBlockHits = (onBlock(strip(rawDeploy)).match(/workflow_dispatch/g) || []).length;
-  assert.equal(onBlockHits, 1, 'deploy-engine.yml declares exactly one workflow_dispatch trigger');
+  assert.equal(onBlockHits, 1, 'deploy.yml declares exactly one workflow_dispatch trigger');
   assert.ok(
     wholeFileHits > onBlockHits,
     `a whole-file grep must over-count (${wholeFileHits} vs ${onBlockHits}) or this test proves nothing`,
   );
-  // ...and the extras are on COMMENT lines — which is what made the original
-  // miscount look like a finding. (main's copy asserts a specific comment
-  // naming deploy-realapp.yml; that text is main's, so the PROPERTY is
-  // asserted here instead of the sentence.)
-  const commentHits = rawDeploy
-    .split('\n')
-    .filter((l) => /^\s*#/.test(l) && /workflow_dispatch/.test(l)).length;
-  assert.ok(commentHits >= 1, 'the over-count must come from comments, or this test proves nothing');
-  assert.equal(wholeFileHits - onBlockHits, commentHits);
+  // ...and at least one of the extras describes a DIFFERENT file's trigger,
+  // which is what made the original miscount look like a finding.
+  assert.match(rawDeploy, /^\s*#.*deploy-realapp\.yml/m);
 });
 
 test('VACUITY: the stripper removes comment lines and NOTHING else', () => {
@@ -276,12 +227,14 @@ test('...and stripping is DEFENCE IN DEPTH here, not the half doing the work', (
 
 // ── 3. THE WIRING — a decision nothing calls is a seam with no consumer ──────
 
-test('each GUARDED workflow actually CALLS the decision, with its own ref', () => {
-  for (const file of GUARDED) {
-    const p = DEPLOY_REF_POLICY[file];
+test('each policy row is actually CALLED by its workflow, with its own ref', () => {
+  for (const [file, p] of Object.entries(DEPLOY_REF_POLICY)) {
     const s = readWf(file);
     assert.match(s, /refDeployVerdict/, `${file}: must call the tested decision by name`);
-    {
+    if (file === 'deploy-realapp.yml') {
+      // PR #67's call site, deliberately untouched: it reads EXPECTED_REF.
+      assert.match(s, /require\(['"]\.\/lib\/realappRefGuard['"]\)\.EXPECTED_REF/, file);
+    } else {
       assert.ok(
         s.includes(`DEPLOY_REF_POLICY['${file}'].expectedRef`),
         `${file}: must READ its expected ref from the policy, not re-type it`,
@@ -305,8 +258,8 @@ test('each GUARDED workflow actually CALLS the decision, with its own ref', () =
   }
 });
 
-test('the guard runs BEFORE auth and BEFORE any deploy, in every guarded workflow', () => {
-  for (const file of GUARDED) {
+test('the guard runs BEFORE auth and BEFORE any deploy, in both new workflows', () => {
+  for (const file of ['deploy.yml', 'deploy-engine.yml']) {
     const s = readWf(file);
     const guard = s.indexOf('Refuse a dispatch on any ref');
     const auth = s.indexOf('google-github-actions/auth@v2');
@@ -323,7 +276,7 @@ test('the guard runs BEFORE auth and BEFORE any deploy, in every guarded workflo
 });
 
 test('checkout uses fetch-depth: 0 in every guard job — without it the guard can never answer', () => {
-  for (const file of GUARDED) {
+  for (const file of Object.keys(DEPLOY_REF_POLICY)) {
     const s = readWf(file);
     const checkout = s.indexOf('actions/checkout@v4');
     const guard = Math.max(s.indexOf('Refuse a dispatch on any ref'), s.indexOf('Refuse any ref that is not'));
@@ -333,13 +286,13 @@ test('checkout uses fetch-depth: 0 in every guard job — without it the guard c
 });
 
 test('the exit code is captured with `|| rc=$?`, never left to `bash -e`', () => {
-  for (const file of GUARDED) {
+  for (const file of Object.keys(DEPLOY_REF_POLICY)) {
     assert.match(readWf(file), /\|\|\s*rc=\$\?/, `${file}`);
   }
 });
 
 test('the dispatched ref reaches the shell through env:, not inline interpolation', () => {
-  for (const file of GUARDED) {
+  for (const file of ['deploy.yml', 'deploy-engine.yml']) {
     const s = readWf(file);
     const block = s.slice(s.indexOf('Refuse a dispatch on any ref'), s.indexOf('google-github-actions/auth@v2'));
     assert.match(block, /REF_NAME:\s*\$\{\{\s*github\.ref_name\s*\}\}/, file);
@@ -353,58 +306,41 @@ test('the dispatched ref reaches the shell through env:, not inline interpolatio
   }
 });
 
-// ── 4. the job shape on THIS branch ─────────────────────────────────────────
-// main's deploy.yml carries its guard as a SEPARATE `ref-guard` job that other
-// jobs `needs:`, and main's copy of this file asserts that topology. Neither
-// workflow on `real-app` has that shape — the guard here is the first STEP of
-// the one job that deploys — so those two assertions are re-pointed rather
-// than deleted: the PROPERTY they protect (a guard that can be skipped while
-// the run stays green) applies to a step-guard too.
+// ── 4. deploy.yml — the push:main path must stay UNAFFECTED ──────────────────
 
-test('the guard job carries no job-level `if:` — a skipped job skips its dependents', () => {
-  // The load-bearing one, and the card names it explicitly. Gating the JOB
-  // would make it SKIP, and GitHub skips any job that `needs:` a skipped job —
-  // so a run could show no failure while the guard never executed. With the
-  // guard as a step of the deploying job, a job-level `if:` would skip the
-  // guard AND the deploy together, which is safe but silent; the rule stands
-  // either way, and it is cheap to keep it asserted.
-  for (const file of GUARDED) {
-    const s = readWf(file);
-    const jobsAt = s.indexOf('jobs:');
-    assert.ok(jobsAt > -1, `${file}: no jobs block`);
-    const jobs = s.slice(jobsAt);
-    assert.doesNotMatch(jobs, /^ {4}if:/m, `${file}: no job in this workflow may be job-level if:-gated`);
+test('the ref-guard JOB carries no job-level `if:` — a skipped job skips its dependents', () => {
+  // The load-bearing one. Gating the JOB on workflow_dispatch would make it
+  // SKIP on every push to main, and GitHub skips any job that `needs:` a
+  // skipped job — so merges would silently stop deploying with no failure
+  // anywhere. The event check belongs on the STEPS, where a skip is inert.
+  const s = readWf('deploy.yml');
+  const job = s.slice(s.indexOf('  ref-guard:'), s.indexOf('  deploy-staging:'));
+  assert.ok(job.length > 0, 'ref-guard job not found');
+  assert.doesNotMatch(job, /^ {4}if:/m, 'ref-guard must not be job-level if:-gated');
+  // ...and the step-level gate IS present, or the guard would run on pushes and
+  // spend a full-history clone deciding a question that has no content there.
+  assert.match(job, /if: github\.event_name == 'workflow_dispatch'/);
+  assert.match(job, /if: github\.event_name != 'workflow_dispatch'/, 'the push path must say so out loud, not log nothing');
+});
+
+test('both deploy jobs depend on the guard — a guard beside them stops only one', () => {
+  const s = readWf('deploy.yml');
+  for (const job of ['deploy-staging', 'deploy-app-staging']) {
+    const at = s.indexOf(`  ${job}:`);
+    assert.ok(at > -1, `job ${job} missing`);
+    const head = s.slice(at, at + 400);
+    assert.match(head, /needs: ref-guard/, `${job} must not deploy without the guard`);
   }
 });
 
-test('the guard is the FIRST thing the deploying job does after checkout', () => {
-  // A guard beside the deploy stops only what runs after it. On this branch
-  // there is one job, so "before auth and before the deploy verb" (asserted
-  // above) plus "nothing else runs between checkout and the guard except the
-  // checkout itself" is the equivalent of main's `needs: ref-guard`.
-  for (const file of GUARDED) {
-    const s = readWf(file);
-    const checkout = s.indexOf('actions/checkout@v4');
-    const guard = s.indexOf('Refuse a dispatch on any ref');
-    assert.ok(checkout > -1 && guard > checkout, `${file}: checkout must precede the guard`);
-    const between = s.slice(checkout, guard);
-    assert.doesNotMatch(between, /- (uses|name):[^\n]*(auth@v2|setup-gcloud|setup-python|run deploy)/,
-      `${file}: nothing may run between checkout and the guard`);
-  }
-});
-
-test('lib/realappRefGuard.js is ABSENT on this branch — and that is the gap, not an oversight', () => {
-  // main carries it as PR #67's call site for deploy-realapp.yml's guard. That
-  // guard is not on this branch (see UNGUARDED_ON_THIS_BRANCH), so the module
-  // would be dead code here. Asserted rather than assumed: if someone ports
-  // the PROD guard across, this REDS and forces them to bring the module and
-  // to move deploy-realapp.yml into GUARDED in the same change.
-  const at = path.join(REPO, 'lib', 'realappRefGuard.js');
-  assert.equal(fs.existsSync(at), false,
-    'lib/realappRefGuard.js appeared — port deploy-realapp.yml\'s guard with it and update GUARDED');
-  // ...and the one decision that IS here is the shared one, not a copy.
-  const src = fs.readFileSync(path.join(REPO, 'lib', 'deployRefPolicy.js'), 'utf8');
-  assert.match(src, /function\s+refDeployVerdict/, 'the decision must live in deployRefPolicy.js on this branch');
+test('lib/realappRefGuard.js re-exports — it does NOT hold a second decision', () => {
+  // A duplicate ancestry parser is how two guards eventually disagree about
+  // what "on the line" means, which is the card's own stated reason for reuse.
+  const src = fs.readFileSync(path.join(REPO, 'lib', 'realappRefGuard.js'), 'utf8');
+  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(code, /function\s+refDeployVerdict/, 'the decision must live in exactly one file');
+  assert.match(code, /require\(['"]\.\/deployRefPolicy['"]\)/);
+  assert.equal(require('../lib/realappRefGuard').refDeployVerdict, refDeployVerdict);
 });
 
 // ── 5. THE NEGATIVE TESTS THE CARD ASKS FOR, ON THE REAL REPOSITORY ──────────
@@ -427,18 +363,13 @@ test('CI gives the real-ref tests the history they need — or they pass on noth
   // in it permanently. So the depth is asserted HERE, where removing it reds
   // loudly, instead of turning the skip into a failure and crying wolf on
   // everyone else.
-  // Re-pointed for this branch: `real-app` has no ci.yml at all — its suite
-  // runs from ci-realapp.yml (card K5YgkNtO). Measured 2026-09-08, that job's
-  // checkout was SHALLOW, so the two real-git tests below would have taken the
-  // SKIP path and passed on nothing here exactly as they did on run
-  // 32849680329. `fetch-depth: 0` is added to it in this same commit.
-  const ci = readWf('ci-realapp.yml');
+  const ci = readWf('ci.yml');
   const testJob = ci.slice(ci.indexOf('  test:'), ci.indexOf('  workflows:'));
-  assert.ok(testJob.length > 0, 'ci-realapp.yml test job not found');
+  assert.ok(testJob.length > 0, 'ci.yml test job not found');
   assert.match(
     testJob,
     /actions\/checkout@v4\n\s+with:\n\s+fetch-depth:\s*0/,
-    'ci-realapp.yml test job must checkout with fetch-depth: 0, or the real-ref tests below skip and pass on nothing',
+    'ci.yml test job must checkout with fetch-depth: 0, or the real-ref tests below skip and pass on nothing',
   );
 });
 

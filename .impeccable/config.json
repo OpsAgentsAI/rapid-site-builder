@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/board/index.html"
+        ],
+        "createdAt": "2026-08-19T07:53:13.440Z",
+        "reason": "pre-existing main-branch design system (agent-hue card bar + needs-strip status accent, shipped via prior Dash-B/C reviews at 67325b1); PR #58 only appended disabled-button + toast CSS and did not introduce these borders"
+      }
+    ]
+  }
+}
