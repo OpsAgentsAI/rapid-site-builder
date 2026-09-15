@@ -53,54 +53,64 @@ jobs:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
       # gha-creds-*.json that auth writes into the workspace.
       #
-      # fetch-depth: 0 is LOAD-BEARING for the ref guard below, not a nicety.
-      # The default (depth 1) gives git no history and no `real-app` ref, so
-      # `merge-base --is-ancestor` exits 128 and the guard aborts every dispatch
-      # — including correct ones. Card LEBxGF5d; a test asserts this value.
+      # fetch-depth: 0 is LOAD-BEARING for the guard below, not thoroughness.
+      # `git merge-base --is-ancestor` on a shallow clone exits 128 ("not a
+      # valid object"), which the policy maps to cannot-verify -> REFUSE. So a
+      # shallow checkout would not fail open, but it would refuse EVERY
+      # dispatch including the legitimate one, and the guard would look broken
+      # rather than protective.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ── REF GUARD (card LEBxGF5d) — runs BEFORE auth and BEFORE any deploy ──
-      # This workflow is workflow_dispatch-only and deploys whatever ref it is
-      # handed. The header above already says it is "NEVER deployed from `main`"
-      # — that was prose. This is the enforcement.
+      # ── REF GUARD (cards 22I0yUum / eKfog19I / LEBxGF5d) ────────────────────
+      # `workflow_dispatch` resolves the workflow FILE from the ref the operator
+      # picks, so a guard committed to one branch only ever runs for dispatches
+      # on THAT branch. This workflow's guard existed only on main, whose copy
+      # expects the deploy branch — so main's copy could only ever refuse, while
+      # the dispatch that actually ships PROD ran this branch's UNGUARDED copy.
+      # The guard was unreachable in the allow direction and redundant in the
+      # refuse direction: it had never protected a real PROD dispatch.
       #
-      # Measured 2026-08-24, before this step existed:
-      #   git rev-list --left-right --count origin/main...origin/real-app -> 40 14
-      #   git merge-base --is-ancestor origin/main origin/real-app        -> rc 1
-      # So a dispatch on `main` rolls builder.opsagents.agency back past the
-      # ns341yIF cutover, both GA4 wirings and connect-your-domain, and reports
-      # success. Two of the last six dispatches of this workflow ran on `main`.
+      # This is the PROD rail (Cloud Run + update-traffic --to-latest + Firebase
+      # Hosting on builder.opsagents.agency). A dispatch from any ref not on
+      # this line rolls that surface backwards and reports SUCCESS.
       #
-      # The decision lives in lib/realappRefGuard.js so it is unit-testable and
-      # so the three-way exit code (0 / 1 / anything-else) cannot be quietly
-      # collapsed into two. Node is already required by this repo.
-      - name: Refuse any ref that is not on the real-app line
-        # REF_NAME goes through env:, never inline `${{ }}` in the run: body.
-        # A git branch name may legally contain `$`, backticks and parentheses,
-        # so `"${{ github.ref_name }}"` inside a double-quoted shell word is a
-        # command-substitution sink. It is only ever printed here, so it is
-        # passed as data. (Same remedy this fleet applied on cli-gateway-portal
-        # PR #23 for an interpolated workflow input.)
+      # The decision lives in lib/deployRefPolicy.js so the three-way exit code
+      # (0 / 1 / anything-else) cannot be quietly collapsed into two, and so the
+      # expected ref has ONE source of truth. Reusing that module rather than
+      # porting a second one is deliberate: deploy-engine.yml on this branch
+      # already calls it, and two policy modules serving the same call sites is
+      # the duplication this card series exists to shrink.
+      #
+      # No `if:` — this workflow has no trigger other than workflow_dispatch, so
+      # every run of it is the case the guard is for. (And a job-level `if:`
+      # would make every `needs:` job skip while the run shows no failure.)
+      - name: Refuse a dispatch on any ref that is not on the deploy line
+        id: refguard
+        # REF_NAME goes through env:, never inline `${{ }}` in the run: body —
+        # a branch name may legally contain `$`, backticks and parentheses.
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
-          EXPECTED=$(node -p "require('./lib/realappRefGuard').EXPECTED_REF")
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp.yml'].expectedRef")
           git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
             || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
             || true
-          # `|| rc=$?` is LOAD-BEARING, not style. GitHub runs this with
-          # `bash -e`, so a bare `--is-ancestor` returning 1 would abort the step
-          # on the spot — fail-closed, but with a generic runner error and none
-          # of the message this card asks for. The compound keeps -e out of it
-          # and captures all three exit codes (0 / 1 / 128).
+          # `|| rc=$?` is LOAD-BEARING: GitHub runs this under `bash -e`, so a
+          # bare `--is-ancestor` returning 1 aborts the step before the message
+          # naming the right ref is ever printed.
           rc=0
           git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
           echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
           RC="$rc" node -e '
-            const { refDeployVerdict } = require("./lib/realappRefGuard");
-            const v = refDeployVerdict(process.env.RC, { dispatchedRef: process.env.REF_NAME });
+            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["deploy-realapp.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+            });
             console.log(v.message);
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
           '
@@ -202,3 +212,43 @@ jobs:
         run: |
           sleep 5
           curl -sf -o /dev/null -w "hosting: %{http_code}\n" "$APP_URL/api/health"
+
+      # ── PROVENANCE (cards 22I0yUum / eKfog19I) ─────────────────────────────
+      # The PROD surface's URL is stable, so after the fact nothing in the run
+      # says WHICH commit is live behind it. This records that, and `always()`
+      # so a REFUSED or FAILED dispatch still leaves a record — that is exactly
+      # when someone goes looking.
+      #
+      # ⚠️ THE WORDING READS THE GUARD'S ACTUAL VERDICT, and that is the whole
+      # point of the step rather than a detail. Card QpERt8db measured the
+      # sibling block on deploy-engine.yml printing
+      #   "expected: main (ancestry verified by the ref guard …)"
+      # on a run where the guard had REFUSED and nothing was deployed — false on
+      # 100% of dispatches from the refused ref. An authoritative-looking record
+      # that is not true is the same harm eKfog19I was filed about, one level
+      # down. So this block ships correct from birth: `steps.refguard.outcome`
+      # decides, and on a refusal it prints no line that reads like a receipt.
+      #
+      # Do NOT "fix" a future issue here by dropping always() — that trades a
+      # false record for NO record on precisely the runs it exists to serve.
+      - name: Record what this PROD surface was deployed from
+        if: always()
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          GUARD: ${{ steps.refguard.outcome }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp.yml'].expectedRef")
+          echo "--- real-app provenance (cards 22I0yUum / eKfog19I) ---"
+          echo "ref       : $REF_NAME"
+          echo "ref check : $GUARD (expected ref: $EXPECTED)"
+          if [ "$GUARD" != "success" ]; then
+            echo "RESULT    : REFUSED or NOT RUN — nothing was deployed from this run."
+            echo "            No commit is recorded here on purpose: printing one would read"
+            echo "            like a deploy receipt for a deploy that did not happen."
+            exit 0
+          fi
+          echo "commit    : $SHA"
+          echo "ancestry  : verified by the ref guard at the top of this job"
+          echo "app       : $(git log -1 --format='%h %ci %s')"
+          echo "Pin the URL above together with this commit."

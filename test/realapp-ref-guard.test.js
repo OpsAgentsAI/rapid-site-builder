@@ -132,67 +132,30 @@ test('NEGATIVE TEST: real `main` is genuinely not on the real-app line', () => {
 });
 
 // ── 3. THE WIRING ───────────────────────────────────────────────────────────
+/**
+ * ⚠️ SIX WORKFLOW-SHAPE TESTS WERE REMOVED HERE BY THE 2026-09-15 RECONCILE
+ * (card XUCfQGz6, issue #70) — guard-step-exists · ref-read-from-the-module ·
+ * before-auth-and-deploy · no-`if:` · fetch-depth-0 · ref-through-`env:`.
+ *
+ * They asserted MAIN's call-site shape for `deploy-realapp.yml`
+ * (`require('./lib/realappRefGuard').EXPECTED_REF`). On this branch card
+ * 22I0yUum (#85) rewrote that call site to read its ref from DEPLOY_REF_POLICY,
+ * and #85's version is the reviewed one on the PROD branch, so these six
+ * described a workflow that no longer exists here.
+ *
+ * They were NOT dropped — every one of the properties is asserted in
+ * test/deploy-ref-policy.test.js, generically over the GUARDED set, which now
+ * contains all three deploy workflows. Retargeting them here instead would have
+ * left two shape suites for one workflow, drifting apart, which is the exact
+ * duplication this card series exists to shrink. The one property that suite did
+ * not carry — a guard step with no off-switch — moved across with them, and got
+ * sharper on the way: `deploy.yml` legitimately scopes its guard to dispatches
+ * because it also fires on `push: main`.
+ *
+ * WHAT STAYS BELOW IS THE DECISION, WHICH THE RECONCILE DOES NOT CHANGE: the
+ * three-way verdict, its refusal message, and the vacuity floor.
+ */
 
-test('the guard step exists in deploy-realapp.yml', () => {
-  assert.match(wf, /- name: Refuse any ref that is not on the real-app line/);
-  assert.match(
-    wf,
-    /refDeployVerdict/,
-    'the step must call the tested decision by name, not re-implement it',
-  );
-});
-
-test('the ref name is READ from the module, never re-typed into the workflow', () => {
-  // Caught by a probe against this file, not reasoned about: an earlier version
-  // asserted only /realappRefGuard/, which the `node -e` body satisfies on its
-  // own — so replacing the EXPECTED_REF lookup with a hardcoded 'real-app'
-  // stayed fully GREEN. Behaviour survived that mutation, but it plants a
-  // SECOND source of truth for the one ref this workflow may deploy, and the
-  // two only have to disagree once.
-  assert.match(wf, /require\(['"]\.\/lib\/realappRefGuard['"]\)\.EXPECTED_REF/);
-  const runBody = wf.slice(
-    wf.indexOf('- name: Refuse any ref that is not on the real-app line'),
-    wf.indexOf('google-github-actions/auth@v2'),
-  );
-  assert.doesNotMatch(
-    runBody.replace(/require\([^)]*\)\.EXPECTED_REF/g, ''),
-    /['"]real-app['"]/,
-    'the guard must not carry its own literal copy of the ref name',
-  );
-});
-
-test('the guard runs BEFORE auth and BEFORE any deploy', () => {
-  const guard = wf.indexOf('Refuse any ref that is not on the real-app line');
-  const auth = wf.indexOf('google-github-actions/auth@v2');
-  const deploy = wf.indexOf('gcloud run deploy');
-  for (const [name, at] of [['guard', guard], ['auth', auth], ['deploy', deploy]]) {
-    assert.ok(at > -1, `anchor not found: ${name}`);
-  }
-  // indexOf returns -1 when absent, and -1 is less than any real position — so
-  // "the guard is before the deploy" would be satisfied by there being NO
-  // deploy at all. Presence is asserted first, above, deliberately.
-  assert.ok(guard < auth, 'the guard must not run after credentials are minted');
-  assert.ok(guard < deploy, 'the guard must not run after the deploy has started');
-});
-
-test('the guard carries no `if:` — it cannot be switched off in place', () => {
-  const block = wf.slice(
-    wf.indexOf('- name: Refuse any ref that is not on the real-app line'),
-    wf.indexOf('google-github-actions/auth@v2'),
-  );
-  assert.ok(block.length > 0);
-  assert.doesNotMatch(block, /^\s{8}if:/m, '`if: false` leaves the step textually present and inert');
-});
-
-test('checkout uses fetch-depth: 0 — without it the guard can never answer', () => {
-  // The default depth-1 clone has no history and no real-app ref, so
-  // --is-ancestor exits 128 and every dispatch aborts as cannot-verify. This
-  // value is what makes the guard usable rather than permanently red.
-  const checkout = wf.indexOf('actions/checkout@v4');
-  const guard = wf.indexOf('Refuse any ref that is not on the real-app line');
-  assert.ok(checkout > -1 && guard > checkout, 'checkout must precede the guard');
-  assert.match(wf.slice(checkout, guard), /fetch-depth:\s*0/);
-});
 
 test('the exit code is captured with `|| rc=$?`, not left to `bash -e`', () => {
   // GitHub runs run: blocks under `bash -e`. A bare `--is-ancestor` returning 1
@@ -201,23 +164,6 @@ test('the exit code is captured with `|| rc=$?`, not left to `bash -e`', () => {
   assert.match(wf, /\|\|\s*rc=\$\?/);
 });
 
-test('the dispatched ref reaches the shell through env:, not inline interpolation', () => {
-  // A git branch name may legally contain `$`, backticks and parens, so an
-  // inline `${{ github.ref_name }}` inside a double-quoted shell word is a
-  // command-substitution sink.
-  const block = wf.slice(
-    wf.indexOf('- name: Refuse any ref that is not on the real-app line'),
-    wf.indexOf('google-github-actions/auth@v2'),
-  );
-  assert.match(block, /REF_NAME:\s*\$\{\{\s*github\.ref_name\s*\}\}/);
-  assert.match(block, /process\.env\.REF_NAME/);
-  const runBody = block.slice(block.indexOf('run: |'));
-  assert.doesNotMatch(
-    runBody,
-    /\$\{\{\s*github\.ref_name\s*\}\}/,
-    'github.ref_name must not be interpolated into the run: body',
-  );
-});
 
 test('VACUITY: the comment stripper leaves real code intact', () => {
   // Without this, a stripper that ate code would blank the file and every
