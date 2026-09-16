@@ -64,7 +64,13 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Card pfjIs7GO. Hosted Actions minutes are OFF by decision (Michal 2026-09-16): every
+    # hosted run of this alarm starts with runner_name="" and steps=0 under the org billing
+    # refusal, so the staleness detector this file exists to be has itself been silent. That
+    # is the exact failure its own header warns about, one level up. Moved to the self-hosted
+    # GCP pool (org runner group `gcp-selfhosted`, this repo is already a member).
+    runs-on: [self-hosted, linux, x64, gcp]
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,6 +80,19 @@ jobs:
           # clear" while blind. The classifier refuses to answer without real
           # history, but only because this line makes real history obtainable.
           fetch-depth: 0
+
+      # Card pfjIs7GO. `node` is ABSENT from the pool image (measured 2026-09-16 on
+      # gha-runner-1: `command -v node` -> MISSING). Four steps below shell out to `node -e`
+      # / `node scripts/check-branch-divergence.js`; on ubuntu-latest node was simply there.
+      # Without this the flip would turn a job that never started into one that dies on
+      # "node: command not found". `gh` IS on the image (/usr/bin/gh, same probe), so the
+      # `gh api` steps need nothing. `persist-credentials` is deliberately NOT disabled here:
+      # the next step runs `git fetch origin` against a PRIVATE repo and needs the token the
+      # checkout leaves in .git/config.
+      - name: Set up Node (absent from the self-hosted pool image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Fetch both branches
         run: git fetch --no-tags origin main real-app
