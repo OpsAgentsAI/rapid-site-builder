@@ -1,0 +1,54 @@
+name: Prod-serving alarm (is what production serves current with real-app)
+
+# Card 65pcQtze — GAP B. The divergence alarm is titled "merged work that cannot
+# reach PROD" but compares two git REFS (main -> real-app). Nothing measured
+# whether PRODUCTION had received real-app's head, and on 2026-09-15 it had not:
+# the last successful deploy-realapp run was 2026-08-17.
+#
+# ── WHY A SEPARATE WORKFLOW, NOT A STEP IN divergence-alarm.yml ─────────────
+# AC-2: gaps A and B must be reported SEPARATELY. The divergence alarm is red for
+# gap A, persistently, and a gap-B failure folded into that red is invisible —
+# which is precisely how a 29-day-old deploy went unnamed. A separate workflow
+# gives gap B its own run history, its own red, and its own title.
+# It also keeps this change off the two files open PR #88 carries.
+#
+# ── THE TITLE IS THE PREDICATE ──────────────────────────────────────────────
+# AC-4, applied to THIS alarm: the name above asks exactly what
+# scripts/check-prod-serving.js answers — nothing more. (The divergence alarm's
+# own over-promising title is AC-4 for THAT file, deferred until PR #88 settles.)
+#
+# ⚠️ HONEST SCOPE: this reds in the Actions tab and writes a job summary. It does
+# NOT yet open/update/close a GitHub issue the way divergence-alarm.yml does, and
+# a red nobody reads is not an audience (card xe1q8uHa's own lesson). Routing is
+# the named follow-up, not an oversight.
+
+on:
+  schedule:
+    # 06:47 UTC daily — off the hour, and 30 minutes after the divergence alarm
+    # (06:17) so the two never contend for the same queue slot.
+    - cron: '47 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # LOAD-BEARING on a PRIVATE repo — reading deploy-realapp.yml's run history
+  # needs the actions scope. divergence-alarm.yml measured the 403 without it.
+  actions: read
+
+concurrency:
+  group: prod-serving-alarm
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Measure gap B (real-app -> what production serves)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Exit 1 = STALE, 2 = UNKNOWN. Both red on purpose: "could not read the
+        # deploy history" must never render as "production is current".
+        run: node scripts/check-prod-serving.js
