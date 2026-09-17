@@ -184,7 +184,11 @@ jobs:
           # A label is exact, is applied at creation time, is served by the REST
           # list endpoint rather than the search index, and has no lag.
           marker='<!-- divergence-alarm:main-to-real-app -->'
-          printf '%s\n\n%s\n' "$BODY" "$marker" > /tmp/alarm-body.md
+          # Card pfjIs7GO: the per-job $RUNNER_TEMP, never a fixed file in the system temp dir —
+          # on the shared self-hosted pool a copy left by another runner account is not writable
+          # (EACCES), which would kill the alarm before it can open or update its issue.
+          body_file="$RUNNER_TEMP/alarm-body.md"
+          printf '%s\n\n%s\n' "$BODY" "$marker" > "$body_file"
           # Idempotent: this succeeds whether or not the label already exists, so
           # the workflow cannot fail on a fresh clone of the repo.
           gh label create "$ALARM_LABEL" --color B60205 \
@@ -193,11 +197,11 @@ jobs:
           existing=$(gh issue list --state open --label "$ALARM_LABEL" \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue edit "$existing" --title "$TITLE" --body-file /tmp/alarm-body.md
+            gh issue edit "$existing" --title "$TITLE" --body-file "$body_file"
             gh issue comment "$existing" --body "Re-measured $(date -u '+%Y-%m-%d %H:%M UTC') · trigger: ${{ github.event_name }}: still unreachable. Details in the issue body."
             echo "updated issue #$existing"
           else
-            gh issue create --title "$TITLE" --body-file /tmp/alarm-body.md \
+            gh issue create --title "$TITLE" --body-file "$body_file" \
               --assignee MichalOpsAgents --label "$ALARM_LABEL"
           fi
 
