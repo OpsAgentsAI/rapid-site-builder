@@ -48,6 +48,24 @@ permissions:
   contents: read
 
 jobs:
+  # ⚖️ 09PBYCJY rule 2 (card vpukxEgQ): enforces that no pull_request-reachable job
+  # in this repo mints a cloud identity. Identity-free by construction — this job
+  # holds no id-token and calls no cloud-auth action, so it can safely run on every
+  # PR, fork included. See test/wif-pr-reachability.test.js for the full incident
+  # writeup. Lives here (not in preview.yml, which is now dispatch-only and has no
+  # pull_request trigger at all to run a job on) alongside this file's other
+  # identity-free PR-time checks.
+  wif-pr-reachability:
+    name: WIF PR-reachability guard (09PBYCJY rule 2)
+    runs-on: [self-hosted, linux, x64, gcp]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test test/wif-pr-reachability.test.js
+
   test:
     # Card pfjIs7GO. Hosted Actions minutes are OFF by decision (Michal 2026-09-16), so every
     # hosted job in this repo starts with runner_name="" and steps=0 under the org billing
