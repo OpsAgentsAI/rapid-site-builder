@@ -16,6 +16,12 @@
 # Run — avoiding the prod ALLOWED_ORIGINS CORS wall. Runs as gha-deployer@opsagent-staging
 # (firebase.admin).
 #
+# --no-authorized-domains (card vpukxEgQ, G3 trap): without it, every channel deploy
+# PATCHes opsagent-staging's Identity Platform authorizedDomains with this channel's
+# URL — a shared-project auth surface this repo has no confirmed Firebase Auth wiring
+# to justify growing. Same class closed on kaflon (vPrDDPM3) and
+# opsagents-ilcf-medinfo (j2gmJo6j).
+#
 # RETURNING THE URL — via GCS, not stdout. A user-managed --service-account build REQUIRES
 # options.logging: CLOUD_LOGGING_ONLY, and with that the build steps' stdout is NOT streamed
 # back by `gcloud builds submit`, so a PREVIEW_URL= line printed here never reaches the GHA
@@ -44,7 +50,8 @@ steps:
         npx -y firebase-tools@15.21.0 hosting:channel:deploy "pr-${_PR_NUMBER}" \
           --only rapid-site-builder \
           --project opsagent-staging \
-          --expires 7d --json --non-interactive > /workspace/ch.json 2> /workspace/ch.err || {
+          --expires 7d --json --non-interactive \
+          --no-authorized-domains > /workspace/ch.json 2> /workspace/ch.err || {
             echo "firebase hosting:channel:deploy failed — stderr:" >&2
             cat /workspace/ch.err >&2
             exit 1
