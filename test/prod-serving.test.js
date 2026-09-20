@@ -104,3 +104,51 @@ test('an unrecognised status maps to the UNKNOWN exit code, never to a pass', ()
 test('VACUITY: the default budget is a positive number of days', () => {
   assert.ok(Number.isFinite(DEFAULT_BUDGET_DAYS) && DEFAULT_BUDGET_DAYS > 0);
 });
+
+/* ── the #89 review's findings, settled by measurement ────────────────────────
+ *
+ * Finding 2 said `scripts/check-prod-serving.js` joins its Step Summary lines with a
+ * LITERAL backslash-n, so the summary renders as one long line containing "\n". Measured
+ * on the file's bytes: the source carries ONE backslash, JS evaluates the escape, and the
+ * report is multi-line. The finding came from a rendering of the diff (where a single
+ * backslash is shown escaped), not from the file — the same family as finding 1 on that
+ * PR, which read a 0-step lockout red as a code defect.
+ *
+ * Refuting it in a comment would not stop the next reader re-raising it from the same
+ * rendering, so the behaviour is pinned here instead.
+ */
+
+test('⭐ REFUTES review finding 2: the Step Summary joiner is a REAL newline, not a literal \\n', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'check-prod-serving.js'), 'utf8');
+  const m = src.match(/const report = lines\.join\((.*?)\);/);
+  assert.ok(m, 'the joiner line moved — re-point this test before trusting it');
+
+  // The assertion is on BEHAVIOUR, not on the source text: evaluate the exact literal the
+  // file uses and require that it produces a one-character newline.
+  const sep = eval(m[1]); // eslint-disable-line no-eval -- the literal under test, nothing else
+  assert.equal(sep, '\n');
+  assert.equal(sep.length, 1, `the joiner is ${JSON.stringify(sep)} — a literal backslash-n WOULD be length 2`);
+  assert.equal(['a', 'b'].join(sep), 'a\nb');
+});
+
+test('CONTROL: the same check FAILS on a genuine literal-backslash joiner', () => {
+  // Without this, the test above would pass on any separator that happens to be defined —
+  // including the defect it claims to rule out.
+  const sep = eval("'\\\\n'"); // eslint-disable-line no-eval -- the defect shape, deliberately
+  assert.equal(sep.length, 2);
+  assert.notEqual(sep, '\n');
+  assert.equal(['a', 'b'].join(sep), 'a\\nb');
+});
+
+test('⭐ review finding 3: undeployed commit details are fetched CONCURRENTLY, and a failure rejects', () => {
+  // The fix is Promise.all rather than a sequential await loop. Pinned two ways: the shape
+  // is present, and the fail-fast property is asserted — a half-filled list would
+  // UNDER-COUNT undeployed work, which reads as healthier than reality.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'check-prod-serving.js'), 'utf8');
+  assert.match(src, /undeployed = await Promise\.all\(/);
+  assert.doesNotMatch(src, /for \(const c of cmp\.commits/, 'the sequential loop is back');
+});

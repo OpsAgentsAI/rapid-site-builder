@@ -54,16 +54,22 @@ async function measure(repo, token) {
     if (Array.isArray(cmp.commits) && cmp.commits.length < Number(cmp.ahead_by)) {
       throw new Error(`compare returned ${cmp.commits.length} of ${cmp.ahead_by} commits — truncated, refusing to judge`);
     }
-    undeployed = [];
-    for (const c of cmp.commits || []) {
-      // The compare payload's commits carry no file list; read each one.
-      const detail = await gh(repo, token, `commits/${c.sha}`);
-      undeployed.push({
-        sha: c.sha,
-        dateISO: c.commit?.committer?.date || null,
-        files: (detail.files || []).map((f) => f.filename),
-      });
-    }
+    // The compare payload's commits carry no file list, so each one needs its own read.
+    // Fetched CONCURRENTLY (review finding 3 on #89): sequential awaits made the runtime
+    // linear in the undeployed count, which is exactly the number that grows while this
+    // alarm is the thing nobody has built yet. Promise.all also fails fast — a single
+    // unreadable commit rejects the whole measurement instead of leaving a half-filled
+    // list that would under-count the undeployed work and read as healthier than it is.
+    undeployed = await Promise.all(
+      (cmp.commits || []).map(async (c) => {
+        const detail = await gh(repo, token, `commits/${c.sha}`);
+        return {
+          sha: c.sha,
+          dateISO: c.commit?.committer?.date || null,
+          files: (detail.files || []).map((f) => f.filename),
+        };
+      }),
+    );
   }
   return { deployedSha, headSha, undeployed, runAt: run ? run.run_started_at || run.created_at : null };
 }
@@ -94,6 +100,13 @@ async function main() {
   ];
   if (m.error) lines.push(`- ⚠️ measurement error: ${m.error}`);
   lines.push('', '_This is NOT the divergence alarm. Gap A (main -> real-app) is reported separately by divergence-alarm.yml._');
+  // ⚠️ This is a REAL newline escape — ONE backslash. Review finding 2 on #89 read it as
+  // `join('\\n')` (two) and called it a bug that renders "\n" as literal text in the Step
+  // Summary. Measured on the bytes: the source carries a single backslash, so JS evaluates
+  // the escape and the report is multi-line. The finding came from a RENDERING of the diff,
+  // not from the file — the same family as finding 1 on this PR, which read a 0-step lockout
+  // as a code defect. test/prod-serving.test.js pins the behaviour so the next reader settles
+  // it by running the suite instead of squinting at an escaped diff.
   const report = lines.join('\n');
   console.log(report);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`);
@@ -103,4 +116,9 @@ async function main() {
   process.exit(exitCodeFor(r.status));
 }
 
-main();
+// Entry guard — found while verifying finding 2: `node -e "require('./scripts/check-prod-serving.js')"`
+// ran the WHOLE measurement and then called process.exit(), because main() was invoked
+// unconditionally at module scope. That makes the file impossible to import for inspection
+// and lets any future `require` of it take the process down with it. The CLI behaviour is
+// unchanged: run directly, it still measures and exits on the status code.
+if (require.main === module) main();
