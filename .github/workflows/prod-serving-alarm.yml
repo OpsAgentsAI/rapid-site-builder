@@ -41,7 +41,21 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # ⚠️ The POOL, like every other job in this repo. Shipped as `ubuntu-latest`
+    # and caught in review (card 65pcQtze bounce, 2026-09-20): hosted minutes are
+    # dark by standing decision, so this alarm would have taken a 0-step lockout
+    # on its 06:47 schedule every morning and measured NOTHING.
+    #
+    # That is not a generic CI nit — it is this card's own pathology one layer
+    # down. The card exists because the sibling divergence alarm is permanently
+    # red for gap A and therefore says nothing about gap B. Shipping a gap-B
+    # alarm that cannot fire would have replaced "an alarm that measures the
+    # wrong thing" with "an alarm that measures nothing", and closed the card on
+    # a signal incapable of reporting.
+    #
+    # Nothing holds it hosted: no WIF, no repo secrets — its only credential is
+    # the per-job `github.token`, which all 12 sibling pool jobs also carry.
+    runs-on: [self-hosted, linux, x64, gcp]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
