@@ -1,4 +1,4 @@
-name: PR Preview
+name: PR Preview (dispatch, verified)
 
 # Per-PR Firebase Hosting preview channel — the staging surface for /board-refinement
 # QA. Uses the same WIF identity as deploy.yml (zero local creds, zero tokens).
@@ -7,25 +7,172 @@ name: PR Preview
 # rapid-builder-proxy Cloud Run — so the preview avoids cross-origin CORS (the prod
 # ALLOWED_ORIGINS only lists rapid-site-builder.web.app). Trade-off: long landing
 # SSE builds on a preview go through the Hosting proxy 60s cap; fine for QA.
+#
+# ⚖️ CTO ruling 09PBYCJY rule 2 (card vpukxEgQ): no `pull_request`-triggered job
+# may mint a deploy identity, on ANY runner. This file used to be exactly that —
+# ONE `preview` job, `id-token: write` at WORKFLOW level, triggering on
+# `pull_request`, authenticating via `secrets.WIF_PROVIDER`/`secrets.WIF_SERVICE_ACCOUNT`
+# — and it had NO job-level event or fork guard at all (`jobIf: null`, confirmed
+# live). The one real mitigation was incidental, not designed: the identity came
+# from `secrets.*`, so a fork PR gets neither value and auth fails there. The
+# same-repo path had no gate of any kind. Same fix, same day, four sibling repos:
+# kaflon (PR #35, vPrDDPM3), kaflon-app (PR #11, ORs73Kc6), msapps-lead-pipeline
+# (PR #992, uHaeFibd), claudeservices-site (PR #104, I4pW1Oh8).
+#
+# ⚠️ WHY THIS MOVED TO `workflow_dispatch` rather than staying on `pull_request`
+# behind an `if:`. A job-level event gate is CODE, and on a same-repo `pull_request`
+# GitHub evaluates the workflow file FROM THE PR HEAD — so a PR adding that one line
+# and then deleting it in a later commit (or simply never having it) runs the deploy
+# job as that PR, with the staging identity. The gate would be guarding itself. A
+# workflow with no `pull_request` trigger at all cannot be reached that way, and
+# `test/wif-pr-reachability.test.js` (run on every PR by ci.yml) is what stops a PR
+# from adding the trigger back.
+#
+# Trade-off, stated plainly: previews are no longer automatic on every push —
+# something with `actions: write` (never a cloud identity) must dispatch this
+# workflow with the PR's number and current head sha. `verify-pr` below refuses
+# unless that PR is open, same-repo, still at the dispatched head, and its own PR
+# gates (`test` + `Lint workflow files`, ci.yml) are green — so a dispatch can never
+# smuggle in an unreviewed or fork-controlled tree.
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to build a preview channel for
+        required: true
+        type: string
+      head_sha:
+        description: Full 40-char head sha you intend to deploy (must still be the PR head)
+        required: true
+        type: string
 
+# No `id-token` at the workflow level. `verify-pr` holds none at all; `deploy`
+# declares its own job-level block below.
 permissions:
   contents: read
-  id-token: write
-  pull-requests: write
 
 concurrency:
-  group: preview-${{ github.event.number }}
+  group: preview-${{ inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
-  preview:
-    runs-on: ubuntu-latest
+  # Card eKfog19I's pattern (lib/deployRefPolicy.js): `workflow_dispatch` runs the
+  # workflow file AS IT EXISTS on the dispatched ref, so this job — unlike
+  # verify-pr, which checks the live PR — checks the DISPATCH ITSELF is not
+  # running an unreviewed branch's own copy of this file (which could carry a
+  # weakened verify-pr). Making this workflow dispatchable at all (card
+  # vpukxEgQ) is exactly what test/deploy-ref-policy.test.js's "every
+  # DISPATCHABLE DEPLOY workflow has a policy row" check enforces mechanically —
+  # this job is what actually discharges that row, the same way deploy.yml and
+  # deploy-engine.yml do.
+  ref-guard:
+    name: Ref guard (dispatch only)
+    runs-on: [self-hosted, linux, x64, gcp]
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a dispatch on any ref that is not on the main line
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['preview.yml'].expectedRef")
+          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
+            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
+            || true
+          rc=0
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
+          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
+          RC="$rc" node -e '
+            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["preview.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+            });
+            console.log(v.message);
+            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+          '
+
+  verify-pr:
+    # ⚠️ MUST hold no cloud identity. If it could mint, moving the check earlier
+    # buys nothing. Identity-free, so it runs on the pool like the rest of this
+    # repo's PR-time checks (ci.yml's `test`/`workflows` jobs already do).
+    runs-on: [self-hosted, linux, x64, gcp]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      head_sha: ${{ steps.check.outputs.head_sha }}
+    steps:
+      - name: Verify the PR is open, same-repo, and still at the dispatched head
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          WANT_SHA: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          case "$PR_NUMBER" in ''|*[!0-9]*) echo "::error::pr_number must be digits, got '$PR_NUMBER'"; exit 1;; esac
+          case "$WANT_SHA" in *[!0-9a-fA-F]*|'') echo "::error::head_sha must be hex, got '$WANT_SHA'"; exit 1;; esac
+          if [ "${#WANT_SHA}" -ne 40 ]; then
+            echo "::error::head_sha must be the FULL 40-char sha (got ${#WANT_SHA}). An abbreviated sha cannot be compared exactly."
+            exit 1
+          fi
+
+          PR_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          STATE=$(printf '%s' "$PR_JSON" | jq -r '.state')
+          HEAD_REPO=$(printf '%s' "$PR_JSON" | jq -r '.head.repo.full_name')
+          HEAD_SHA=$(printf '%s' "$PR_JSON" | jq -r '.head.sha')
+
+          echo "PR #${PR_NUMBER}: state=$STATE head_repo=$HEAD_REPO head=$HEAD_SHA"
+
+          [ "$STATE" = "open" ] || { echo "::error::PR #${PR_NUMBER} is '$STATE', not open."; exit 1; }
+          [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ] || {
+            echo "::error::PR #${PR_NUMBER} head is '$HEAD_REPO', not '$GITHUB_REPOSITORY' — fork PRs are refused."; exit 1; }
+          [ "$HEAD_SHA" = "$WANT_SHA" ] || {
+            echo "::error::PR #${PR_NUMBER} head moved: dispatched '$WANT_SHA', live '$HEAD_SHA'. Re-dispatch with the current sha."; exit 1; }
+
+          # Both PR-time gates must be green on the sha being deployed. Names
+          # measured live via `gh api .../check-runs` on a real main-targeted PR
+          # head — "test" (ci.yml's job KEY, no name: override) and "Lint workflow
+          # files" (ci.yml's `workflows` job, which DOES override name:).
+          CHECKS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100")
+          for NEED in "test" "Lint workflow files"; do
+            CONC=$(printf '%s' "$CHECKS" | jq -r --arg n "$NEED" '[.check_runs[] | select(.name == $n)] | sort_by(.started_at) | last | .conclusion // "missing"')
+            [ "$CONC" = "success" ] || { echo "::error::PR gate '$NEED' is '$CONC' on ${HEAD_SHA} (need 'success')."; exit 1; }
+            echo "gate '$NEED' = success on ${HEAD_SHA}"
+          done
+
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "::notice::PR #${PR_NUMBER} verified at ${HEAD_SHA} — proceeding."
+
+  deploy:
+    name: Deploy preview channel
+    needs: [ref-guard, verify-pr]
+    # STAGING identity (gha-deployer@opsagent-staging), not prod — accepted on the
+    # shared pool per the fleet's own standing distinction (msapps-lead-pipeline's
+    # deploy-staging.yml header: "this staging deploy is accepted on the pool ...
+    # and prod's are REFUSED"). Matches this job's pre-existing placement.
+    runs-on: [self-hosted, linux, x64, gcp]
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      # Pin the ref to the VERIFIED sha — not to the branch, which can move
+      # between verification and checkout.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-pr.outputs.head_sha }}
 
       - uses: google-github-actions/auth@v2
         with:
@@ -36,6 +183,9 @@ jobs:
 
       - name: Deploy preview channel (via Cloud Build — WIF-on-runner workaround)
         id: deploy
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: |
           # firebase-tools (Node google-auth) CANNOT consume the WIF external_account
           # credential on a GitHub-hosted runner — hosting:channel:deploy fails
@@ -51,22 +201,23 @@ jobs:
           # invisible here under the build's required CLOUD_LOGGING_ONLY) — we read it back.
           set -o pipefail
           gcloud builds submit . \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --project "${PROJECT_ID}" \
             --config=cloudbuild-preview.yaml \
-            --substitutions=_PR_NUMBER="${{ github.event.number }}" \
-            --service-account="projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+            --substitutions=_PR_NUMBER="${PR_NUMBER}" \
+            --service-account="projects/${PROJECT_ID}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
           # Read the channel URL the build wrote to GCS (stdout isn't visible under CLOUD_LOGGING_ONLY).
-          URL=$(gcloud storage cat "gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt" 2>/dev/null || true)
+          URL=$(gcloud storage cat "gs://${PROJECT_ID}_cloudbuild/preview-urls/pr-${PR_NUMBER}.txt" 2>/dev/null || true)
           if [ -z "$URL" ]; then
-            echo "::error::Cloud Build preview deploy produced no channel URL at gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt — inspect the Cloud Build logs"
+            echo "::error::Cloud Build preview deploy produced no channel URL at gs://${PROJECT_ID}_cloudbuild/preview-urls/pr-${PR_NUMBER}.txt — inspect the Cloud Build logs"
             exit 1
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo "Preview channel URL: $URL"
 
       - name: Smoke test the channel
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
         run: |
-          URL="${{ steps.deploy.outputs.url }}"
           test -n "$URL"
           curl -sf -o /dev/null -w "board: %{http_code}\n" "$URL/board/"
           curl -sf -o /dev/null -w "api/health: %{http_code}\n" "$URL/api/health"
@@ -74,6 +225,8 @@ jobs:
       - name: Comment preview URL on the PR
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          URL: ${{ steps.deploy.outputs.url }}
         run: |
-          gh pr comment "${{ github.event.number }}" --repo "${{ github.repository }}" --body \
-            "🧪 **Preview channel** (board-refinement staging surface): ${{ steps.deploy.outputs.url }} — /board · /campfire · expires 7d. \`/api/*\` proxies to the live Cloud Run via the catch-all rewrite."
+          gh pr comment "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --body \
+            "🧪 **Preview channel** (board-refinement staging surface): ${URL} — /board · /campfire · expires 7d. \`/api/*\` proxies to the live Cloud Run via the catch-all rewrite."
