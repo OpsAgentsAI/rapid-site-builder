@@ -60,6 +60,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ⚠️ LOAD-BEARING, and the reason this alarm measured NOTHING for two runs.
+      # The pool image has no node on PATH — divergence-alarm.yml records the same
+      # probe ("gha-runner-1: `command -v node` -> MISSING") and carries this step
+      # for the same reason. Without it the measure step below dies at
+      # `node: command not found`, exit 127, BEFORE the script runs.
+      #
+      # 127 is not one of this alarm's verdicts. check-prod-serving.js exits
+      # 1 = STALE and 2 = UNKNOWN, both red on purpose; 127 is the runner saying
+      # the program never started, and in the Actions tab it looks identical to a
+      # measurement that ran. Measured on both runs the alarm has ever had:
+      # 35713932198 (dispatch, 2026-09-22 10:04Z) and 35725033827 (its own cron,
+      # 12:04Z), each dead at the measure step.
+      #
+      # A per-file fix would leave the class intact, so the class is pinned by
+      # test/pool-node-setup.test.js: every pool job that shells out to node must
+      # set node up FIRST. The ORDER is part of the rule — setup-node only mutates
+      # PATH for the steps that follow it.
+      - name: Set up Node (absent from the self-hosted pool image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Measure gap B (real-app -> what production serves)
         env:
           GH_TOKEN: ${{ github.token }}
