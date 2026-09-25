@@ -21,9 +21,6 @@ concurrency:
   group: preview-${{ github.event.number }}
   cancel-in-progress: true
 
-env:
-  HOSTING_SITE: rapid-site-builder
-
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -37,16 +34,35 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy preview channel
+      - name: Deploy preview channel (via Cloud Build — WIF-on-runner workaround)
         id: deploy
         run: |
-          npm install -g firebase-tools@13 >/dev/null 2>&1
-          firebase hosting:channel:deploy "pr-${{ github.event.number }}" \
-            --only "$HOSTING_SITE" \
+          # firebase-tools (Node google-auth) CANNOT consume the WIF external_account
+          # credential on a GitHub-hosted runner — hosting:channel:deploy fails
+          # "Failed to authenticate, have you run firebase login?" DETERMINISTICALLY.
+          # gcloud/curl mint tokens from the same runner fine; only the Node CLI fails.
+          # So gcloud (WIF works on the runner) submits a Cloud Build that runs the channel
+          # deploy INSIDE GCP via metadata-server ADC — the failure class disappears. This
+          # is the same fix already proven for the prod hosting deploy in deploy.yml
+          # (#28 / wfbwoc9B); see cloudbuild-preview.yaml. The build runs as
+          # gha-deployer@opsagent-staging (firebase.admin) and ships web/ AS-IS (no
+          # __API_BASE__ bake) so the preview calls same-origin /api/* through the "**"
+          # rewrite. The build hands the channel URL back via a GCS object (its stdout is
+          # invisible here under the build's required CLOUD_LOGGING_ONLY) — we read it back.
+          set -o pipefail
+          gcloud builds submit . \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --expires 7d --json | tee /tmp/ch.json
-          URL=$(node -e "const j=require('/tmp/ch.json');const s=Object.values(j.result||{})[0]||{};console.log(s.url||'')")
+            --config=cloudbuild-preview.yaml \
+            --substitutions=_PR_NUMBER="${{ github.event.number }}" \
+            --service-account="projects/${{ secrets.GCP_PROJECT_ID }}/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+          # Read the channel URL the build wrote to GCS (stdout isn't visible under CLOUD_LOGGING_ONLY).
+          URL=$(gcloud storage cat "gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt" 2>/dev/null || true)
+          if [ -z "$URL" ]; then
+            echo "::error::Cloud Build preview deploy produced no channel URL at gs://${{ secrets.GCP_PROJECT_ID }}_cloudbuild/preview-urls/pr-${{ github.event.number }}.txt — inspect the Cloud Build logs"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Preview channel URL: $URL"
 
       - name: Smoke test the channel
         run: |

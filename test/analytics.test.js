@@ -146,14 +146,26 @@ test('KNOWN-POSITIVE: the snippet loads ONLY inside the enabled branch', () => {
   assert.ok(callMatch.index > guard, 'the loader must be unreachable until the config says enabled');
 });
 
-test('GA4 is untouched — this card must not block on, or disturb, the gtag wiring', () => {
+test('GA4 keeps flowing after the reconciliation — via the adapter, not the inline snippet', () => {
   // Measured on origin/real-app @c6436a1 and verified against the GA Admin
   // API: property 549064186 is "RSB Builder" in the OpsAgents AI account —
-  // RSB's OWN property, not a sibling stream. The card's premise that this
-  // surface has "no GA4" was already out of date; keep it that way.
+  // RSB's OWN property, not a sibling stream.
+  // Amended by the xe1q8uHa reconciliation merge: main had ALREADY replaced
+  // the inline gtag snippet with the @opsagentsai/observability adapter
+  // (BNlDstQX supersedes WZtm0jA3), so the merge dropped the inline block
+  // from both pages. GA4 delivery is now: page -> /analytics.js -> vendored
+  // adapter -> gtag.js, keyed by GA4_MEASUREMENT_ID from /api/client-config
+  // (wired into deploy-realapp.yml with the same measurement ID the inline
+  // snippet carried). Asserting the DELIVERY PATH, not the old snippet:
+  // keeping the old assertion would red forever on a change that was made
+  // deliberately, on main, by the card series that owns analytics.
   for (const page of ['web/index.html', 'web/board/index.html']) {
-    assert.ok(read(page).includes('googletagmanager.com/gtag/js'), `${page} lost its GA4 wiring`);
+    assert.ok(read(page).includes('/analytics.js'), `${page} lost the analytics bootstrap`);
   }
+  const boot = read('web/analytics.js');
+  assert.ok(boot.includes('initObservability'), 'the GA4 adapter init is gone — GA4 would stop reporting');
+  assert.ok(boot.includes('ga4MeasurementId'), 'the adapter is never handed a measurement ID');
+  assert.ok(boot.includes('/api/client-config'), 'the GA4 config endpoint call is gone');
 });
 
 test('the health endpoint reports the analytics posture', () => {

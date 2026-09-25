@@ -1,4 +1,40 @@
-name: Deploy
+name: Deploy STAGING (auto on main)
+
+# ── TIER MAP — read this before editing either deploy workflow (cards g0pH1JZX, rQunsPko) ──
+#
+# | tier        | Cloud Run              | Hosting site            | trigger                    | auth |
+# |-------------|------------------------|-------------------------|----------------------------|------|
+# | RETIRED     | rapid-builder-proxy    | rapid-site-builder      | push:main — THIS FILE      | OFF  |
+# |             |                        | + rapid-site-builder-he |                            |      |
+# | APP-STAGING | rapid-builder-app-stg  | rapid-builder-stg       | push:main — THIS FILE      | ON   |
+# | PROD        | rapid-builder-app      | rapid-site-builder-app  | workflow_dispatch —        | ON   |
+# |             |                        |                         | .github/workflows/deploy-realapp.yml |
+#
+# ⚠️ THE `rapid-builder-proxy` ROW IS THE **RETIRED HACKATHON SURFACE, NOT A QA
+# TIER.** Card KjHpbn3J retired it on purpose: every interactive route on it is
+# 410/301 and it is auth-OFF by Michal's 2026-06-16 guardrail. Until card
+# rQunsPko there was no staging tier of the app at all, and this file's own
+# header called the retired row "STAGING" — which is what sent three consecutive
+# readers toward un-retiring it. QA the app on **APP-STAGING**. Never here.
+#
+# A prod dispatch deploys whatever REF it is dispatched on — that workflow's own
+# header records `real-app` as its historical branch. Check the ref you pick; it
+# is not implied by the workflow.
+#
+# 🚨 THE NAMES READ BACKWARDS. `rapid-site-builder` is the RETIRED surface;
+# `rapid-site-builder-app` is PROD; the new QA tier is `rapid-builder-stg`,
+# deliberately NOT `rapid-site-builder-stg`, so it stays clear of that family.
+# Anyone skimming will "fix" this the wrong way round. Say which TIER you mean in
+# every comment you add here, never just the site name.
+#
+# `builder.opsagents.agency` is bound to the PROD site (rapid-site-builder-app).
+# It served 2026-08-17 bytes for four days because every merge deployed green to
+# STAGING while the domain pointed at PROD — the deploys were landing on a
+# different site than the domain serves. Michal's decision (2026-08-21, option B)
+# was to formalise the two sites as two tiers rather than repoint the domain.
+#
+# So: pushing to main does NOT ship the customer-facing builder. A prod release
+# is a deliberate dispatch of deploy-realapp.yml.
 
 on:
   push:
@@ -20,7 +56,91 @@ env:
   HOSTING_SITE: rapid-site-builder
 
 jobs:
-  deploy:
+  # ── REF GUARD (card eKfog19I) ───────────────────────────────────────────────
+  # This workflow is `push: main` AND `workflow_dispatch`. The dispatch path
+  # deployed whatever ref it was handed — including `real-app`, which would push
+  # the auth-ON product onto the RETIRED ungated surface and then
+  # `update-traffic --to-latest`. Card LEBxGF5d closed the same hole on the PROD
+  # workflow; this is the second of the three instances eKfog19I measured.
+  #
+  # ── WHY THIS IS ITS OWN JOB AND NOT A STEP IN EACH DEPLOY JOB ──────────────
+  # Two reasons, both load-bearing:
+  #
+  #  1. There are TWO deploy jobs and they run in parallel. A guard inside one
+  #     of them stops that one and lets the other deploy anyway. `needs:` makes
+  #     the ordering structural instead of positional.
+  #  2. The guard needs full history (`fetch-depth: 0`) and the deploy jobs do
+  #     not. Isolating it here keeps every push-to-main deploy on the cheap
+  #     depth-1 checkout it has always used.
+  #
+  # ⚠️ THE JOB CARRIES NO JOB-LEVEL `if:` ON PURPOSE, AND A TEST PINS THAT.
+  # A skipped job makes every job that `needs:` it skip too — so gating this job
+  # on `github.event_name == 'workflow_dispatch'` would silently stop deploying
+  # on every merge to main while the run showed no failure. The EVENT check
+  # belongs on the STEPS, where a skip is inert. This is the cry-wolf direction
+  # of the same class the guard itself is about.
+  #
+  # ⚠️ AND DO NOT "OPTIMISE" fetch-depth INTO
+  #        fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 0 || 1 }}
+  # 0 is FALSY in GitHub expressions, so that expression always evaluates to 1 —
+  # the guard would then be permanently cannot-verify and abort every dispatch,
+  # with nothing in the diff to say why. A constant 0 is correct and boring.
+  ref-guard:
+    name: Ref guard (dispatch only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse a dispatch on any ref that is not on the main line
+        if: github.event_name == 'workflow_dispatch'
+        # REF_NAME goes through env:, never inline `${{ }}` in the run: body.
+        # A git branch name may legally contain `$`, backticks and parentheses,
+        # so `"${{ github.ref_name }}"` inside a double-quoted shell word is a
+        # command-substitution sink. It is only ever printed, so it is data.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy.yml'].expectedRef")
+          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
+            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
+            || true
+          # `|| rc=$?` is LOAD-BEARING, not style. GitHub runs this with `bash -e`,
+          # so a bare `--is-ancestor` returning 1 aborts the step on the spot —
+          # fail-closed, but with a generic runner error and none of the message
+          # that tells the operator which ref to use instead.
+          rc=0
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
+          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
+          RC="$rc" node -e '
+            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["deploy.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+            });
+            console.log(v.message);
+            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+          '
+
+      # The push:main path is deliberately untouched: on a merge the ref IS the
+      # expected ref, so there is nothing to decide. Saying so out loud beats a
+      # job whose log is empty on most of its runs — an empty log reads like a
+      # guard that did not run.
+      - name: push to main — ref guard not applicable
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "event=${{ github.event_name }}: this run is a push to main, which IS the ref this workflow deploys."
+          echo "The ref guard applies to workflow_dispatch only (card eKfog19I)."
+
+  # RETIRED-hackathon tier. Functionally unchanged by cards g0pH1JZX and
+  # rQunsPko — only named for what it is, so the next reader is not misled into
+  # treating it as the QA surface. The QA surface is deploy-app-staging below.
+  deploy-staging:
+    name: Deploy RETIRED hackathon surface (rapid-builder-proxy + rapid-site-builder)
+    needs: ref-guard
     runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
@@ -34,22 +154,43 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy Cloud Run
+      - name: Deploy Cloud Run — STAGING (rapid-builder-proxy)
         run: |
+          # --set-env-vars uses a custom delimiter (^|^) so the comma-separated
+          # ALLOWED_ORIGINS value is NOT mis-parsed as additional env-var pairs.
+          # With the default comma delimiter, a 2nd allowed origin breaks gcloud
+          # ("Bad syntax for dict arg"). See gcloud topic escaping. Full canonical
+          # env list (rule #20: --set-env-vars REPLACES — every key must be present).
+          #
+          # --min-instances 0 (card KjHpbn3J step 4, the safe half): this service
+          # now backs only the RETIRED hackathon surfaces — every interactive
+          # route on them is 410/301, so all it still serves is published demo
+          # sites at /sites/**. Paying for a warm instance around the clock to
+          # hold open a surface whose whole purpose is to redirect elsewhere is
+          # the cost this card set out to stop. A cold start on a static
+          # published page is the right trade; --cpu-boost covers it.
+          #
+          # ⚠️ NEVER put a comment BETWEEN two backslash-continued lines. bash
+          # splices `\`+newline before word-splitting, so the `#` opens a comment
+          # whose own unescaped newline ENDS the command — leaving a valid
+          # `gcloud run deploy … --allow-unauthenticated` with no --set-env-vars,
+          # which under rule #20 wipes every env key on the service. That is
+          # exactly what this file did until card rFZrx6fL; `bash -n` exits 0 on
+          # it, and the ci.yml `workflows` job is the only thing that sees it.
           gcloud run deploy "$SERVICE" \
             --source . \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
-            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
-            --set-env-vars "AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }},SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }},PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }},USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }},IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }},IMAGE_REGION=global,IMAGE_MODEL=gemini-3-pro-image-preview,WARM_KEY=${{ secrets.WARM_KEY }},PUBLIC_BASE_URL=https://rapid-site-builder.web.app,ALLOWED_ORIGINS=https://rapid-site-builder.web.app" \
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
+            --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|PUBLIC_BASE_URL=https://rapid-site-builder.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-site-builder.web.app,https://rapid-site-builder-he.web.app|GA4_MEASUREMENT_ID=G-T8S1JFMTH3|RETIRE_UNGATED=1|CANONICAL_APP_URL=https://builder.opsagents.agency" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
           gcloud run services update-traffic "$SERVICE" --to-latest \
             --project "$PROJECT_ID" --region "$REGION" --quiet
 
-      - name: Smoke test Cloud Run
+      - name: Smoke test Cloud Run — STAGING
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
@@ -60,16 +201,218 @@ jobs:
           # Deploy Cloud Run step at all — see deploy-realapp.yml for the auth-ON,
           # customDomains-flipping surface and its matching smoke assertions).
 
-      - name: Deploy Firebase Hosting
+      - name: Deploy Firebase Hosting — STAGING sites, via Cloud Build (native metadata ADC)
         run: |
-          # Bake the Cloud Run URL into the static pages: long SSE builds must
-          # bypass the Hosting proxy (it caps streaming responses ~60s).
+          # Bake the Cloud Run URL into the static pages (long SSE builds bypass the
+          # Hosting proxy 60s cap), THEN ship the baked source to Cloud Build.
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
-          npm install -g firebase-tools@13 >/dev/null 2>&1
-          firebase deploy --only hosting --project "$PROJECT_ID" --non-interactive   # deploys rapid-site-builder + rapid-site-builder-he (Hebrew default)
+          # firebase-tools (Node google-auth) CANNOT consume the WIF external_account
+          # credential on a GitHub-hosted runner — it fails "Failed to authenticate"
+          # DETERMINISTICALLY (gcloud/curl mint tokens from the same runner fine; only the
+          # Node CLIs fail). So gcloud (WIF works on the runner) submits a Cloud Build that
+          # runs the hosting deploy INSIDE GCP via metadata-server ADC — the failure class
+          # disappears. Mirrors OpsAgentsAI/msapps-lead-pipeline (card 7RuzMRm0). Build runs
+          # as gha-deployer@opsagent-staging (firebase.admin); see cloudbuild-hosting.yaml.
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
 
-      - name: Smoke test Hosting
+      - name: Smoke test Hosting — STAGING
         run: |
           sleep 5
           curl -sf -o /dev/null -w "hosting: %{http_code}\n" "https://rapid-site-builder.web.app/api/health"
+
+      # Card KjHpbn3J: the retirement is currently held up by ONE token —
+      # `RETIRE_UNGATED=1`, sitting inside a fifteen-variable single-line
+      # --set-env-vars above. Rule #20 means that line is rewritten in full on
+      # every deploy, so dropping that one token is a plausible edit — and if it
+      # went, anonymous /api/build would quietly start answering again, burning
+      # engine spend on a surface Michal retired on 2026-07-17, with every
+      # signal in this workflow still green. Nothing checked. Now something does.
+      #
+      # Asserted from the OUTSIDE, against the live hosts, after the deploy —
+      # not by grepping the env line, which would only prove we wrote the token,
+      # not that the running service honours it.
+      - name: Verify the retired surfaces stay retired
+        run: |
+          set -euo pipefail
+          CANON="https://builder.opsagents.agency"
+          fail=0
+          for host in rapid-site-builder rapid-site-builder-he; do
+            # Anonymous engine endpoints must be GONE.
+            for p in /api/build /api/publish /api/ask /api/import-site; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$host.web.app$p")
+              if [ "$code" != "410" ]; then
+                echo "::error::https://$host.web.app$p answered $code, expected 410 — the ungated engine is REACHABLE again (card KjHpbn3J). Check RETIRE_UNGATED=1 survived the --set-env-vars rewrite."
+                fail=1
+              fi
+            done
+            # The launch posts (LinkedIn, X, YouTube, the GitHub release) all
+            # link the old URLs. They must REDIRECT, never 404.
+            for p in / /board /campfire; do
+              got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 20 "https://$host.web.app$p")
+              case "$got" in
+                301\ ${CANON}*) : ;;
+                *) echo "::error::https://$host.web.app$p gave '$got', expected a 301 to $CANON — a launch-post link is broken (card KjHpbn3J)."; fail=1 ;;
+              esac
+            done
+            # Published demo sites must keep resolving: /sites/** is the one path
+            # still served here, and the card's AC says public links must not
+            # break. A 301 or a 5xx here means the teardown went too far.
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$host.web.app/sites/__ci_probe_nonexistent__")
+            if [ "$code" != "404" ]; then
+              echo "::error::https://$host.web.app/sites/** answered $code, expected 404 from the app — published demo sites are no longer being served (card KjHpbn3J AC3)."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ]
+          echo "✅ both retired surfaces: engine 410, launch links 301, /sites/** still served."
+
+      # ── The OTHER direction (card 6kf27M5o) ─────────────────────────────────
+      # Everything above proves the retired hosts stay retired, and that they
+      # redirect to $CANON. Nothing proved $CANON answers. It is the URL every
+      # client demo deck now closes with (Pealton section 07, Ford section 04,
+      # and the Notion PRD's canonical section spine, so every future deck too).
+      #
+      # The failure this closes is a copy-paste, not a typo: RETIRE_UNGATED=1 is
+      # one token inside the fifteen-key single-line --set-env-vars above, and
+      # rule #20 rewrites that whole line on every deploy. deploy-realapp.yml
+      # carries the same shape of line for the canonical service. Land the flag
+      # there and builder.opsagents.agency 410s its own /api/build and 301s / to
+      # CANONICAL_APP_URL — which for that service is itself.
+      #
+      # ⚠️ And nothing would have said so. The retirement middleware exempts
+      # /api/health by design, and /api/health is the ONLY thing
+      # deploy-realapp.yml asserts after its deploy. The endpoint the pipeline
+      # watches is the endpoint the retirement is written to leave alone.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify the CANONICAL surface is NOT retired
+        run: node scripts/check-canonical-live.js
+
+  # ── APP-STAGING tier (card rQunsPko) ────────────────────────────────────────
+  # The QA surface for the REAL, auth-ON app. Until this job existed there was
+  # none: `gcloud run services list` in opsagent-staging returned exactly
+  # rapid-builder-app (PROD) and rapid-builder-proxy (RETIRED), and
+  # `firebase hosting:sites:list` exactly the three rapid-site-builder* sites.
+  # Authenticated flows had nowhere to be QA'd except PROD.
+  #
+  # A SEPARATE JOB, deliberately, not extra steps on the job above: each job gets
+  # its own checkout, so the `sed` that bakes the Cloud Run URL into web/ cannot
+  # collide with the retired tier's bake of a different URL into the same files.
+  #
+  # 🚫 This job must NEVER set RETIRE_UNGATED. That flag is what turns the app
+  # into the retired surface (410 on the engine, 301 on the pages) — setting it
+  # here would produce a "staging tier" that cannot exercise a single thing it
+  # exists to QA, while every check in this workflow stayed green.
+  deploy-app-staging:
+    name: Deploy APP-STAGING (rapid-builder-app-stg + rapid-builder-stg)
+    needs: ref-guard
+    runs-on: ubuntu-latest
+    env:
+      # Deliberately NOT named SERVICE / HOSTING_SITE: those are the workflow-level
+      # names for the RETIRED tier, and two same-named values in one file is how a
+      # reader (or a grep-based guard) attributes a line to the wrong tier.
+      STG_SERVICE: rapid-builder-app-stg
+      STG_HOSTING_SITE: rapid-builder-stg
+      STG_APP_URL: https://rapid-builder-stg.web.app
+    steps:
+      # checkout MUST precede auth: checkout(clean:true) would wipe the
+      # gha-creds-*.json that auth writes into the workspace.
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Cloud Run — APP-STAGING (auth ON)
+        run: |
+          # ⚠️ --update-env-vars, NOT --set-env-vars (rule #20). The retired tier
+          # above uses --set-env-vars because it owns its full env set and pins it
+          # in test/deploy-env-contract.test.js. This tier MERGES, matching PROD:
+          # a key edited operationally on the service (PAID_TIER_UIDS is the one
+          # that already bit PROD) must not be deleted by the next push to main.
+          #
+          # The ^|^ delimiter is required even though ALLOWED_ORIGINS carries a
+          # single origin today: under the default comma delimiter the moment a
+          # second origin is added gcloud reads it as more env-var pairs and fails
+          # "Bad syntax for dict arg". Same reason both sibling deploys use it.
+          #
+          # SESSION_SECRET comes from Secret Manager via --set-secrets, never an
+          # env literal. Verified 2026-08-23: rapid-builder-session-secret grants
+          # roles/secretmanager.secretAccessor to exactly
+          # rapid-builder-proxy@opsagent-staging, which is the SA PROD already
+          # runs as — so RUN_SERVICE_ACCOUNT can read it on the first deploy.
+          #
+          # --min-instances 0: PROD holds a warm instance; a QA tier must not.
+          #
+          # ⚠️ NEVER put a comment BETWEEN two backslash-continued lines — bash
+          # splices `\`+newline before word-splitting, so the `#` opens a comment
+          # whose own newline ENDS the command (card rFZrx6fL).
+          gcloud run deploy "$STG_SERVICE" \
+            --source . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
+            --update-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://rapid-builder-stg.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-builder-stg.web.app" \
+            --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
+            --quiet
+          # deploy does not promote traffic when a pin exists — promote explicitly
+          gcloud run services update-traffic "$STG_SERVICE" --to-latest \
+            --project "$PROJECT_ID" --region "$REGION" --quiet
+
+      - name: Smoke test Cloud Run — APP-STAGING (expect auth ON)
+        run: |
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          echo "Service URL: $URL"
+          curl -sf "$URL/api/health" | tee /tmp/health-stg.json
+          grep -q '"agentEngine":true' /tmp/health-stg.json
+          # FAIL-CLOSED. lib/auth.js: AUTH_ENABLED = FIREBASE_PROJECT_ID &&
+          # FIREBASE_API_KEY && SESSION_SECRET. A deploy that silently lost any
+          # one of the three would otherwise stand up an ungated "QA" tier and
+          # report success — the exact shape this card's board keeps producing.
+          grep -q '"auth":true' /tmp/health-stg.json
+
+      - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
+        run: |
+          # Bake this tier's OWN Cloud Run URL into the static pages before the
+          # submit. Long SSE builds bypass the Hosting proxy's 60s cap.
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
+          # firebase-tools cannot consume the WIF external_account credential on a
+          # GitHub runner; gcloud can, so gcloud submits a Cloud Build that runs
+          # the hosting deploy inside GCP on metadata ADC. The config is SCOPED to
+          # rapid-builder-stg, so the retired sites and PROD stay untouched.
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-staging-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+
+      # Asserted from the OUTSIDE, against the live host — not against the Cloud
+      # Run URL, and not by grepping this file. The whole point of the tier is
+      # what a human QA'ing it will actually hit.
+      - name: Smoke test Hosting — APP-STAGING serves the real app, signed-in-capable
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -sf "$STG_APP_URL/api/health" | tee /tmp/health-stg-hosting.json
+          grep -q '"agentEngine":true' /tmp/health-stg-hosting.json
+          grep -q '"auth":true' /tmp/health-stg-hosting.json
+          # `/` must serve the app: 200, never a 301 (that would mean this tier
+          # inherited the retirement redirects) and never a 404 (that would mean
+          # the static bundle did not ship).
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$STG_APP_URL/")
+          if [ "$code" != "200" ]; then
+            echo "::error::$STG_APP_URL/ answered $code, expected 200 serving the real app. A 301 means this tier picked up the KjHpbn3J retirement redirects; a 404 means web/ did not deploy."
+            exit 1
+          fi
+          echo "✅ APP-STAGING: auth ON, engine reachable, / serves the app."

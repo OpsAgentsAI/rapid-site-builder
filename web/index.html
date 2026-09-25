@@ -3,21 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<!-- Google Analytics 4 (GA4) — RSB Builder property 549064186, stream builder.opsagents.agency. Raw canonical gtag.js (house rule: never firebase-analytics SDK). Measurement ID is public client config. -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-8ZV9B6NH11"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){ dataLayer.push(arguments); }
-  gtag('js', new Date());
-  gtag('config', 'G-8ZV9B6NH11');
-  // Web error-tracking baseline (Crashlytics is native-only) — exception events, no PII.
-  window.addEventListener('error', function(e){
-    gtag('event', 'exception', { description: (e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||0)).slice(0,150), fatal: false });
-  });
-  window.addEventListener('unhandledrejection', function(e){
-    gtag('event', 'exception', { description: ('unhandledrejection: ' + String(e && e.reason)).slice(0,150), fatal: false });
-  });
-</script>
+<link rel="icon" href="/opsagents-mark.svg" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/opsagents-mark.svg"/>
 <title>Rapid Site Builder — your AI web team, live</title>
 <meta name="description" content="Describe your business in one line. A Google Cloud agent team designs, writes, and ships your website in front of you — free."/>
 <link rel="canonical" href="https://rapid-site-builder.web.app/"/>
@@ -33,7 +20,7 @@
 <meta name="twitter:title" content="Rapid Site Builder — one line in, a live website + the AI team that runs it"/>
 <meta name="twitter:description" content="Six AI agents build your site in front of you — and keep running it. Built with Gemini 3. Free to try."/>
 <meta name="twitter:image" content="https://rapid-site-builder.web.app/og.png"/>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Rapid Site Builder","applicationCategory":"DesignApplication","operatingSystem":"Web","description":"Describe your business in one line — an AI agent team designs, writes, and ships your website live, then keeps operating it.","url":"https://rapid-site-builder.web.app/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"OpsAgents","url":"https://opsagents.agency/"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Rapid Site Builder","applicationCategory":"DesignApplication","operatingSystem":"Web","description":"Describe your business in one line — an AI agent team designs, writes, and ships your website live, then keeps operating it.","url":"https://rapid-site-builder.web.app/","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@type":"Organization","name":"OpsAgents","url":"https://opsagents.agency/","logo":{"@type":"ImageObject","url":"https://rapid-site-builder.web.app/opsagents-mark.svg"}}}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <script src="/i18n.js"></script>
@@ -73,6 +60,8 @@ header.top{background:var(--surface);border-bottom:1px solid var(--border)}
 .head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-block:16px}
 .wordmark{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-display);font-weight:800;font-size:21px;letter-spacing:-.02em;color:var(--brand-charcoal);text-decoration:none}
 .wordmark .br{color:var(--brand-orange);font-weight:700}
+.wordmark .mark{width:26px;height:26px;flex:0 0 auto;display:block}
+[dir=rtl] .wordmark .mark{transform:none}
 .wordmark .ai{font-size:11px;font-weight:700;color:#fff;background:var(--brand-gradient);padding:2px 8px;border-radius:var(--radius-pill);letter-spacing:0}
 .badges{display:flex;gap:8px;flex-wrap:wrap}
 .badge{font-size:12.5px;font-weight:600;color:var(--ink-2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;background:var(--surface)}
@@ -102,9 +91,19 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .go:hover{transform:translateY(-2px);box-shadow:0 14px 30px var(--brand-orange-ring)}
 .go:disabled{opacity:.55;cursor:wait;transform:none;box-shadow:none}
 .free{color:var(--ink-3);font-size:13px;text-align:center;margin-top:12px}
+/* bring-my-own-website import row */
+.importrow{margin-bottom:14px}
+.importline{display:flex;gap:10px}
+.importline input{flex:1;min-width:0}
+.importbtn{border:1px solid var(--border-strong);background:var(--surface);color:var(--ink-2);border-radius:var(--radius-md);font:600 13.5px var(--font-body);padding:0 16px;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
+.importbtn:hover{border-color:var(--brand-orange);color:var(--brand-orange)}
+.importbtn:disabled{opacity:.55;cursor:wait}
+.importmsg{font-size:12.5px;color:var(--ink-3);margin-top:8px;min-height:16px;text-align:start}
+.importmsg.ok{color:var(--status-healthy,#00C875)}
+.importmsg.bad{color:#B3261E}
 /* media drop-zone */
 .mediarow{margin-bottom:14px}
-.mediarow .opt{text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink-3)}
+.mediarow .opt,.importrow .opt{text-transform:none;letter-spacing:0;font-weight:500;color:var(--ink-3)}
 .dropzone{border:1.5px dashed var(--border-strong);border-radius:var(--radius-md);background:var(--surface-sunken);padding:18px 16px;text-align:center;font-size:13.5px;color:var(--ink-3);cursor:pointer;transition:border-color .15s,background-color .15s}
 .dropzone:hover,.dropzone.drag{border-color:var(--brand-orange);background:var(--brand-orange-soft);color:var(--ink-2)}
 .dropzone .linklike{border:0;background:none;color:var(--brand-orange);font:600 13.5px var(--font-body);cursor:pointer;padding:0;text-decoration:underline}
@@ -205,6 +204,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 [dir=rtl] .bub .msg{border-radius:14px 4px 14px 14px}
 [dir=rtl] .wordmark .br{display:inline-block;transform:scaleX(-1)}
 [dir=rtl] .agent .last,[dir=rtl] .preview .url,[dir=rtl] .bub pre{direction:rtl;text-align:start}
+[dir=rtl] .agent.working{transform:translateX(-4px)}
 /* ---------- mobile polish (card kP9hZRul) ---------- */
 @media(max-width:640px){
   /* header: wordmark + lang on one row; tech badges collapse to one scrollable strip
@@ -227,7 +227,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 </head>
 <body>
 <header class="top"><div class="wrap head">
-  <a class="wordmark" href="/"><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
+  <a class="wordmark" href="/"><img class="mark" src="/opsagents-mark.svg" alt="OpsAgents" width="26" height="26" decoding="async"/><span class="br">&lsaquo;</span>Rapid Site Builder<span class="br">&rsaquo;</span><span class="ai">AI</span></a>
   <div class="badges">
     <span class="badge"><b>Google Cloud Agent Builder</b> · ADK</span>
     <span class="badge"><b>Gemini</b> + Nano Banana Pro (Gemini 3) images</span>
@@ -247,6 +247,14 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         <button class="chip" type="button" data-cat="fitness" data-i18n="chip.2">Boutique pilates studio for busy parents</button>
         <button class="chip" type="button" data-cat="real_estate" data-i18n="chip.3">Family real-estate agency, 20 years in the Sharon</button>
         <button class="chip" type="button" data-cat="food_beverage" data-i18n="chip.4">Cozy neighborhood bakery with a wood-fired oven</button>
+      </div>
+      <div class="importrow">
+        <label for="siteurl"><span data-i18n="import.label">Already have a website?</span> <span class="opt" data-i18n="import.opt">(paste it — the team starts from your real business)</span></label>
+        <div class="importline">
+          <input id="siteurl" maxlength="2048" inputmode="url" autocomplete="url" placeholder="https://your-current-site.com" data-i18n-ph="import.ph"/>
+          <button type="button" class="importbtn" id="importbtn" data-i18n="import.btn">Start from my site</button>
+        </div>
+        <div class="importmsg" id="importmsg" role="status" aria-live="polite"></div>
       </div>
       <div class="frow">
         <div><label for="business" data-i18n="label.business">Business name</label><input id="business" maxlength="120" placeholder="Cafe Luna" data-i18n-ph="ph.business"/></div>
@@ -274,7 +282,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       </div>
       <div class="mediarow">
         <label for="mfiles"><span data-i18n="media.label">Your photos &amp; videos</span> <span class="opt" data-i18n="media.opt">(optional — the team features them on your site)</span></label>
-        <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos">
+        <div class="dropzone" id="dz" role="button" tabindex="0" aria-label="Add photos or videos" data-i18n-aria="media.aria">
           <input id="mfiles" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple hidden/>
           <span data-i18n="media.drop">Drop files here or</span> <button type="button" class="linklike" id="mpick" data-i18n="media.browse">browse</button> <span data-i18n="media.limits">— up to 8 · photos ≤15MB · video ≤100MB</span>
         </div>
@@ -328,6 +336,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 
 <script src="/device.js"></script>
 <script src="/auth.js"></script>
+<script src="/analytics.js" defer></script>
+<script src="/posthog.js" defer></script>
 <script>
 (() => {
   // Injected at deploy: the Cloud Run service URL. Long SSE builds must hit the
@@ -379,7 +389,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
   function mediaChip(file) {
     const el = document.createElement('span');
     el.className = 'mchip up';
-    el.innerHTML = '<span class="nm"></span><span class="st">uploading…</span>';
+    el.innerHTML = '<span class="nm"></span><span class="st"></span>';
+    el.querySelector('.st').textContent = T('media.uploading');
     el.querySelector('.nm').textContent = file.name.length > 26 ? file.name.slice(0, 24) + '…' : file.name;
     $('mchips').appendChild(el);
     return el;
@@ -398,7 +409,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       if (!pr.ok) throw new Error('Upload failed (' + pr.status + ')');
       MEDIA.push({ name: sj.name, kind: file.type.indexOf('video') === 0 ? 'video' : 'image' });
       chip.className = 'mchip ok';
-      st.textContent = file.type.indexOf('video') === 0 ? '🎞 ready' : '📷 ready';
+      st.textContent = file.type.indexOf('video') === 0 ? T('media.ready.video') : T('media.ready.photo');
     } catch (e) {
       mediaCount--;
       chip.className = 'mchip bad';
@@ -470,7 +481,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       const target = personaOf(personaFor(hand[1]));
       const line = document.createElement('div');
       line.className = 'sysline';
-      line.textContent = `${p.name} brings in ${target ? target.name : hand[1]}`;
+      line.textContent = T('feed.brings', { a: p.name, b: target ? target.name : hand[1] });
       pushBubble(line);
       return;
     }
@@ -492,11 +503,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       // tool calls become a soft "working" chip; args fold away
       const chip = document.createElement('span');
       chip.className = 'tool';
-      chip.innerHTML = `<i></i>working: ${tool[1].replace(/_/g, ' ')}`;
+      chip.innerHTML = '<i></i>';
+      chip.appendChild(document.createTextNode(T('feed.working', { tool: tool[1].replace(/_/g, ' ') })));
       msg.appendChild(chip);
       if (tool[2] && tool[2].trim().length > 3) {
         const det = document.createElement('details');
-        det.innerHTML = `<summary>details</summary>`;
+        det.innerHTML = '<summary></summary>';
+        det.querySelector('summary').textContent = T('feed.details');
         const pre = document.createElement('pre');
         pre.textContent = tool[2].slice(0, 500);
         det.appendChild(pre);
@@ -505,7 +518,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     } else if (jsonish) {
       // structured results fold behind a tap — proof without the wall of JSON
       const det = document.createElement('details');
-      det.innerHTML = `<summary>shared structured results</summary>`;
+      det.innerHTML = '<summary></summary>';
+      det.querySelector('summary').textContent = T('feed.results');
       const pre = document.createElement('pre');
       pre.textContent = text.slice(0, 700);
       det.appendChild(pre);
@@ -535,6 +549,38 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     if (n >= 3) agentsRan.has('phoenix') && setPill('phoenix', 'd');
   }
 
+  // Bring my own website (card OWIBIIsu): the server reads the pasted site and
+  // answers with brief suggestions; we pre-fill the form and the human still
+  // reviews + clicks Build. Errors land inline, never as a dead end.
+  async function importOwnSite() {
+    const url = $('siteurl').value.trim();
+    const msg = $('importmsg');
+    if (!url) { $('siteurl').focus(); return; }
+    $('importbtn').disabled = true;
+    msg.className = 'importmsg';
+    msg.textContent = T('import.busy');
+    try {
+      const r = await fetch(API + '/api/import-site', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || T('import.fail'));
+      const b = j.brief || {};
+      if (b.business) $('business').value = b.business;
+      if (b.description) $('description').value = b.description;
+      if (b.category && $('category').querySelector('option[value="' + b.category + '"]')) $('category').value = b.category;
+      msg.className = 'importmsg ok';
+      msg.textContent = T('import.done', { host: j.sourceHost || url });
+      if (window.rsbTrack) rsbTrack('site_import_used', {});
+      if (window.rsbPH) rsbPH('site_import_used', { source_host: j.sourceHost || '' });
+    } catch (e) {
+      msg.className = 'importmsg bad';
+      msg.textContent = String((e && e.message) || T('import.fail'));
+    } finally {
+      $('importbtn').disabled = false;
+    }
+  }
+
   async function build() {
     const brief = {
       business: $('business').value.trim(),
@@ -554,6 +600,9 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     $('preview').style.display = 'none';
     $('pstate').className = 'pstate';
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (window.rsbTrack) rsbTrack('build_started', { category: brief.category || '' });
+    // PostHog activation event (card u4xmePAo): the funnel's build-request step.
+    if (window.rsbPH) rsbPH('site_build_requested', { category: brief.category || '', lang: brief.lang, has_media: (brief.media || []).length > 0 });
 
     // instant feedback — Theo greets before the first engine byte arrives
     phase(0);
@@ -619,6 +668,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
             $('preview').style.display = 'block';
             $('actions').style.display = 'flex';
             $('preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (window.rsbTrack) rsbTrack('build_completed', { category: brief.category || '' });
           }
           else if (ev.type === 'error') throw new Error(ev.message);
         }
@@ -663,10 +713,13 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         j = await r.json();
       }
       if (!r.ok) throw new Error(j.error || 'Publish failed');
-      setPill('max', 'd', 'shipped ' + j.url);
+      if (window.rsbTrack) rsbTrack('site_published', { id: j.id || '' });
+      // PostHog activation event (card u4xmePAo): the funnel's publish step.
+      if (window.rsbPH) rsbPH('site_published', { id: j.id || '' });
+      setPill('max', 'd', T('dyn.shipped.pill', { url: j.url }));
       agentsRan.add('max');
-      lastByAgent.max = 'Shipped the site live: ' + j.url;
-      feedByAgent.max = ['render(spec) → single-file HTML', 'saved to site store', 'live at ' + j.url.replace(/^https?:\/\//, '')];
+      lastByAgent.max = T('dyn.shipped.line', { url: j.url });
+      feedByAgent.max = [T('feed.max.0'), T('feed.max.1'), T('feed.max.2', { url: j.url.replace(/^https?:\/\//, '') })];
       $('live-a').textContent = j.url; $('live-a').href = j.url;
       $('live').style.display = 'flex';
       $('publish').style.display = 'none';
@@ -706,7 +759,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     try { saved = JSON.parse(localStorage.getItem('last_build') || 'null'); } catch { /* noop */ }
     if (!saved || !saved.spec || !saved.html) return;
     if (Date.now() - (saved.at || 0) > 7 * 24 * 3600 * 1000) return; // a week-old draft is stale
-    $('restore-name').textContent = saved.spec.business || 'your site';
+    $('restore-name').textContent = saved.spec.business || T('dyn.yourbiz');
     $('restore').style.display = 'block';
     $('restore-go').addEventListener('click', () => {
       lastBuild = { spec: saved.spec, heroImage: saved.heroImage, html: saved.html, userMedia: saved.userMedia || [] };
@@ -726,6 +779,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 
   $('langbtn').addEventListener('click', () => RSB_I18N.setLang(RSB_I18N.lang === 'he' ? 'en' : 'he'));
   $('go').addEventListener('click', build);
+  $('importbtn').addEventListener('click', importOwnSite);
+  $('siteurl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); importOwnSite(); } });
   $('publish').addEventListener('click', publish);
   $('again').addEventListener('click', () => location.reload());
   $('copy').addEventListener('click', () => navigator.clipboard.writeText($('live-a').href));

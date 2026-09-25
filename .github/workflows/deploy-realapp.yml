@@ -22,6 +22,12 @@ name: Deploy Real App (auth-ON, separate surface)
 # Final gate is operator-only: one real Google sign-in QA (the "verify it's you"
 # wall can't be driven headlessly).
 
+# ── TIER MAP (card g0pH1JZX) ────────────────────────────────────────────────
+# THIS FILE IS THE **PROD** TIER: rapid-builder-app + rapid-site-builder-app,
+# which is what `builder.opsagents.agency` actually serves.
+# STAGING is deploy.yml -> rapid-builder-proxy + rapid-site-builder, on push:main.
+# 🚨 The names read backwards — `rapid-site-builder` is STAGING. Say the TIER.
+
 on:
   workflow_dispatch:
 
@@ -118,8 +124,39 @@ jobs:
 
       - name: Deploy Cloud Run (auth ON)
         run: |
-          # Full canonical env set (rule #20: --set-env-vars REPLACES, so the list
-          # must be complete) = the hackathon set PLUS the three auth vars that flip
+          # ⚠️ --update-env-vars, NOT --set-env-vars (rule #20, card g0pH1JZX).
+          #
+          # This line WAS --set-env-vars, which REPLACES. Diffed against the live
+          # service on 2026-08-21 (`gcloud run services describe rapid-builder-app`),
+          # it carried 14 keys while the service carries 17 — so the next dispatch
+          # would have DELETED three that nothing here sets:
+          #     PAID_TIER_UIDS          <- paid users lose their entitlement
+          #     FIREBASE_HOSTING_SITE
+          #     FIREBASE_HOSTING_PROJECT
+          # SESSION_SECRET survived only because --set-secrets below names it.
+          #
+          # --update-env-vars MERGES: it writes the keys named here and leaves
+          # every other key on the service alone. That is the correct tool for a
+          # deploy that does not own the full env set — and this one does not,
+          # because PAID_TIER_UIDS is edited operationally, not in this file.
+          #
+          # Union note (xe1q8uHa reconciliation): FIREBASE_HOSTING_SITE /
+          # FIREBASE_HOSTING_PROJECT ARE owned here — the connect-your-domain
+          # routes (card DYE9159z) fail closed without them — and
+          # GA4_MEASUREMENT_ID is owned here because the reconciliation removed
+          # the inline gtag snippet from web/*.html in favour of the
+          # observability adapter, which reads it from /api/client-config
+          # (server env). G-8ZV9B6NH11 is the existing PROD measurement ID that
+          # was hardcoded in those pages (property 549064186, stream
+          # builder.opsagents.agency) — carried forward, not invented.
+          # PAID_TIER_UIDS stays operator-managed: unset in the workflow, its
+          # live value is untouched by --update-env-vars.
+          #
+          # The ^|^ delimiter is required: ALLOWED_ORIGINS contains a comma, and
+          # under the default delimiter gcloud reads it as more env-var pairs
+          # ("Bad syntax for dict arg"). Same reason deploy.yml uses it.
+          #
+          # The auth vars that flip
           # AUTH_ENABLED on (FIREBASE_PROJECT_ID + FIREBASE_API_KEY + SESSION_SECRET;
           # FIREBASE_AUTH_DOMAIN = opsagent-staging.firebaseapp.com (the project default).
           # Its /__/auth/handler redirect URI is pre-registered on the auto-provisioned
@@ -127,33 +164,6 @@ jobs:
           # to the OAuth client by hand (no API) and 404s sign-in until then — verified
           # 2026-06-30 (auth/unauthorized-domain → redirect_uri_mismatch). SESSION_SECRET
           # comes from Secret Manager, never an env literal.
-          #
-          # Cutover (ns341yIF): builder.opsagents.agency is the canonical front
-          # door. ALLOWED_ORIGINS carries both it and the web.app default (SSE
-          # builds call the Cloud Run URL cross-origin), and PUBLIC_BASE_URL
-          # mints published-site links on the custom domain. The comma inside
-          # ALLOWED_ORIGINS needs gcloud's custom-delimiter syntax (^|^) or the
-          # value parses as a new env pair — same fix as deploy.yml (4y97480y).
-          #
-          # Connect-your-domain (card DYE9159z): the /api/domains routes shipped in
-          # PR #47 and ARE serving — /api/health returns customDomains:false with the
-          # key present, and /api/domains/status answers 503 (live-but-unconfigured)
-          # rather than the 404 of absent code. `false` is lib/domains.js failing
-          # CLOSED because FIREBASE_HOSTING_SITE never reached the container: the
-          # workflow knew the site id all along (HOSTING_SITE, above) but only used
-          # it for the Hosting deploy, never for Cloud Run. Rule #20 again — these
-          # three have to join the one --set-env-vars string or they replace it.
-          #
-          # FIREBASE_HOSTING_PROJECT is technically redundant (lib/domains.js falls
-          # back to FIREBASE_PROJECT_ID, already set) — passed explicitly so the
-          # Hosting project is stated rather than inherited, per the runbook.
-          #
-          # PAID_TIER_UIDS is wired to a secret that may not exist yet. Unset →
-          # empty string → domains.isPaid() is false for everyone → the feature is
-          # unreachable. That is the intended fail-closed default and lets this
-          # land before the paid-tier roster is decided. PAID_TIER_OPEN is
-          # deliberately NOT set: it treats every signed-in user as paid and the
-          # repo marks it demo/self-host only.
           gcloud run deploy "$SERVICE" \
             --source . \
             --project "$PROJECT_ID" \
@@ -161,7 +171,7 @@ jobs:
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 1 --max-instances 20 \
-            --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://builder.opsagents.agency|ALLOWED_ORIGINS=https://builder.opsagents.agency,https://rapid-site-builder-app.web.app|FIREBASE_HOSTING_SITE=${{ env.HOSTING_SITE }}|FIREBASE_HOSTING_PROJECT=${{ secrets.GCP_PROJECT_ID }}|PAID_TIER_UIDS=${{ secrets.PAID_TIER_UIDS }}" \
+            --update-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://builder.opsagents.agency|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://builder.opsagents.agency,https://rapid-site-builder-app.web.app|FIREBASE_HOSTING_SITE=${{ env.HOSTING_SITE }}|FIREBASE_HOSTING_PROJECT=${{ secrets.GCP_PROJECT_ID }}|GA4_MEASUREMENT_ID=G-8ZV9B6NH11" \
             --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
@@ -177,16 +187,10 @@ jobs:
           # the real-app surface MUST report auth enabled (fail-closed safety net:
           # a deploy that silently lost the auth env would otherwise publish ungated)
           grep -q '"auth":true' /tmp/health.json
-          # STANDING RULE: if a deploy exists to flip an env-gated boolean in
-          # /api/health, the smoke step must assert that boolean — a green deploy
-          # (revision updates, /health returns 200) says nothing about whether the
-          # feature it shipped is actually on. Card DYE9159z/#52 wired
-          # FIREBASE_HOSTING_SITE=${{ env.HOSTING_SITE }} into Cloud Run specifically
-          # to flip customDomains true; that top-level env: key renaming or vanishing
-          # would render as an empty string with no error, so this assertion is the
-          # only thing that would catch it (incident: a card sat 41h in Deploy Staging
-          # on a "deployed" claim that was true about the deploy, wrong about the
-          # feature — Trello BpHnPUfH).
+          # customDomains MUST report true (card DYE9159z standing rule: a deploy
+          # that exists to flip an env-gated boolean asserts that boolean — a green
+          # deploy says nothing about the feature). FIREBASE_HOSTING_SITE is wired
+          # above; an empty value renders customDomains:false with no error.
           grep -q '"customDomains":true' /tmp/health.json
 
       - name: Deploy Firebase Hosting (separate site, via Cloud Build native ADC)

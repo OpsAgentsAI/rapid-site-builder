@@ -6,12 +6,41 @@
 
 ![Rapid Site Builder — one line in, a live website plus the AI team that runs it, out](web/og.png)
 
-Built for the Google Cloud Rapid Agent Hackathon (Arize track). Submitted state: tag [`devpost-submission`](../../releases/tag/devpost-submission); development continues on main. Google-native end to end:
+Built for the Google Cloud Rapid Agent Hackathon (Arize track). Submitted state: tag [`devpost-submission`](../../releases/tag/devpost-submission). **Development continues on the `real-app` branch, not on `main` — see [Branches & surfaces](#branches--surfaces) before concluding a feature is missing.** Google-native end to end:
 
-- **Google Cloud Agent Builder (ADK)** — a five-specialist crew orchestrated by `site_builder_orchestrator`, deployed on **Vertex AI Agent Engine**
+- **Google Cloud Agent Builder (ADK)** — an eight-specialist crew orchestrated by `site_builder_orchestrator`, deployed on **Vertex AI Agent Engine**. The design trio — Dana (UX flow) · Remy (visual system) · Kai (frontend checks) — joins the build conversation once the serving engine carries them (`BUILDER_DESIGN_TRIO=1`).
 - **Gemini 3** for every agent turn (`gemini-3-flash-preview`, routed to the global Vertex endpoint from inside the pickled crew), plus **Nano Banana Pro (`gemini-3-pro-image-preview`)** for hero photography (GCS-cached by business category)
 - **Arize Phoenix MCP** (partner integration) — the observability agent records every build run through Phoenix's MCP server
 - No other AI anywhere.
+
+## Branches & surfaces
+
+This repo ships **two live surfaces from two branches**, deliberately. They are diverged and stay diverged.
+
+| surface | branch | deploy workflow | Cloud Run service | Hosting site | auth |
+|---|---|---|---|---|---|
+| **Hackathon demo** (frozen) | `main` | `deploy.yml` — on push | `rapid-builder-proxy` | `rapid-site-builder.web.app` | **off** |
+| **Real app** (the product) | `real-app` | `deploy-realapp.yml` — manual dispatch | `rapid-builder-app` | `rapid-site-builder-app.web.app` | **on** |
+
+`main` is the Devpost demo: no login, anyone can build and publish. `real-app` is where the product is
+built — accounts, `ownerUid`-scoped sites, the post-login operate board — and it is the branch that
+carries ongoing work. Each surface has its own **deploy** rail, but **CI is shared**: `ci.yml` runs
+`npm test` on every PR to **both** `main` and `real-app` — it is the real merge gate. `preview.yml`
+additionally deploys a Hosting preview channel for `main` PRs and smoke-tests `/board` + `/api/health`;
+it never runs the test suite, so it is not the gate. `ci-realapp.yml` adds real-app-specific checks.
+
+> **The consequence worth stating outright: a feature can be live in production and absent from `main`,
+> and that is by design.** Reading `main`'s tree or its commit history answers "is this on the hackathon
+> demo?", never "was this ever built". Check the branch the feature belongs to — post-login work is
+> always `real-app`.
+>
+> This is not hypothetical. P2b (operate-board media upload) merged to `real-app` as PR #39 in July and
+> has served in production since; because `lib/p2b-media.js` does not exist on `main`, a later review
+> read `main` alone and concluded it had "never been built", sending a finished ticket back to the
+> backlog. The next reader would have rebuilt shipped code.
+
+Nothing crosses over implicitly: the two deploy paths target different services and different Hosting
+sites, so a push to `main` cannot change the real-app surface, and vice versa.
 
 ## The experience
 
