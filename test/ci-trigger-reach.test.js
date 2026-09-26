@@ -34,7 +34,12 @@ const WF = path.join(REPO, '.github', 'workflows');
 
 /** Branch names a workflow file's `on:` block lists, per event. */
 function triggerBranches(yamlText, event) {
-  const re = new RegExp(`\\n  ${event}:\\n(?:[^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
+  // Only lines indented UNDER the event (4+ spaces) may sit between the event
+  // key and its `branches:`. The old `[^\\n]*` let an UNFILTERED event borrow
+  // the NEXT event's branch list, so `pull_request:` with no filter followed by
+  // `push: branches:[main]` read as [main]: the unfiltered, fires-everywhere
+  // case looked safe (card SFPFwKu8, caught by the control test below).
+  const re = new RegExp(`\\n  ${event}:\\n(?:    [^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
   const m = re.exec(yamlText);
   if (!m) return null;
   return m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
@@ -72,9 +77,21 @@ test('ci.yml no longer claims to gate real-app on either event', () => {
   }
 });
 
-test('the reason it cannot: real-app genuinely has no ci.yml', () => {
+test('the reason it cannot: nothing named ci.yml on real-app fires FOR real-app', () => {
   // ⚠️ Skips LOUDLY rather than passing on nothing when the ref is absent (a
   // shallow clone or a fork), matching this repo's existing deploy-ref tests.
+  //
+  // Card SFPFwKu8: this used to assert real-app has NO ci.yml. The main→real-app
+  // forward-port (PR #88, merge 777f28f4, card xe1q8uHa) carried one over, so
+  // that premise stopped being true and main went red on the next push. The
+  // premise was never the point. The point is that real-app must not be gated
+  // by a ci.yml that fires for real-app beside ci-realapp.yml. Both emit the
+  // same `test` / `Lint workflow files` check names (see the ⭐ test below), so
+  // two firing on one event would show duplicate checks nobody can tell apart.
+  // So the invariant is now: if real-app carries a ci.yml, its triggers must
+  // name only main. That makes it inert on real-app (a push to real-app, or a PR
+  // into real-app, resolves real-app's copy and does not match `[main]`), and
+  // ci-realapp.yml stays the ONE gate.
   const files = workflowsOn('origin/real-app');
   if (!files) {
     console.log('SKIP: origin/real-app not present — cannot verify (needs fetch-depth: 0)');
@@ -82,13 +99,35 @@ test('the reason it cannot: real-app genuinely has no ci.yml', () => {
   }
   assert.ok(files.length > 0, 'origin/real-app has no workflows at all — measurement is wrong');
   assert.ok(
-    !files.includes('ci.yml'),
-    'real-app now HAS a ci.yml — the premise of this card changed; re-read before re-adding the branch',
-  );
-  assert.ok(
     files.includes('ci-realapp.yml'),
     'real-app lost ci-realapp.yml — it is now ungated, which is worse than the clause this card removed',
   );
+  if (!files.includes('ci.yml')) return; // the original premise: nothing to check
+  const realappCi = execFileSync('git', ['show', 'origin/real-app:.github/workflows/ci.yml'], {
+    cwd: REPO,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  for (const event of ['push', 'pull_request']) {
+    const branches = triggerBranches(realappCi, event);
+    // No branch filter at all would fire on EVERY branch, real-app included.
+    assert.ok(branches, `real-app's ci.yml has no ${event}.branches filter — it would fire for real-app`);
+    assert.ok(
+      !branches.includes('real-app'),
+      `real-app's ci.yml ${event}.branches names real-app — it now double-gates real-app beside ` +
+        'ci-realapp.yml with identical check names. Keep real-app out of it (card SFPFwKu8).',
+    );
+  }
+});
+
+test('control: the real-app ci.yml check really discriminates (fires-for-real-app shapes are caught)', () => {
+  const inert = 'on:\n  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n';
+  const live = 'on:\n  pull_request:\n    branches: [main, real-app]\n  push:\n    branches: [main]\n';
+  const unfiltered = 'on:\n  pull_request:\n  push:\n    branches: [main]\n';
+  assert.deepEqual(triggerBranches('\n' + inert, 'pull_request'), ['main']);
+  assert.ok(triggerBranches('\n' + live, 'pull_request').includes('real-app'));
+  // An event with no `branches:` directly under it reads as null (would fire everywhere).
+  assert.equal(triggerBranches('\n' + unfiltered, 'pull_request'), null);
 });
 
 // Card vpukxEgQ (09PBYCJY rule 2): ci.yml gained a `wif-pr-reachability` job as
