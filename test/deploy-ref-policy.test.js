@@ -74,7 +74,7 @@ const DEPLOY_VERBS =
  * REDS until this table is updated — so closing the gap cannot be done
  * quietly, and neither can widening it.
  */
-const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml', 'deploy.yml']);
+const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml', 'deploy.yml', 'preview.yml']);
 
 /**
  * ⚠️ EMPTY AS OF THE 2026-09-15 RECONCILE (card XUCfQGz6, issue #70) — and the
