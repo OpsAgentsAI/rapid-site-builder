@@ -60,6 +60,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # LOAD-BEARING, not a version pin (card yXnplL83). The pool image has NO
+      # node/npm (measured on a self-hosted runner: `node: command not found`,
+      # exit 127, first seen run 36134275689) — the exact same finding ci.yml's
+      # `test` job already recorded for this same pool. This step is missing,
+      # not optional: without it every scheduled run of this alarm fails before
+      # measuring anything, which is a false "cannot tell" reported as nothing
+      # (no red, no summary) rather than the real gap-B signal this workflow
+      # exists to carry.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Measure gap B (real-app -> what production serves)
         env:
           GH_TOKEN: ${{ github.token }}
