@@ -1,0 +1,7 @@
+# Card pfjIs7GO. `gcp` is the custom label of the org's self-hosted GCP runner pool
+# (runner group `gcp-selfhosted`, VM gha-runner-1). Without declaring it here actionlint
+# reports `label "gcp" is unknown` on every job that targets
+# `runs-on: [self-hosted, linux, x64, gcp]`, which reds `Lint workflow files`.
+self-hosted-runner:
+  labels:
+    - gcp

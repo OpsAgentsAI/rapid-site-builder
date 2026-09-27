@@ -87,7 +87,7 @@ jobs:
   # with nothing in the diff to say why. A constant 0 is correct and boring.
   ref-guard:
     name: Ref guard (dispatch only)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, gcp]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,7 +141,7 @@ jobs:
   deploy-staging:
     name: Deploy RETIRED hackathon surface (rapid-builder-proxy + rapid-site-builder)
     needs: ref-guard
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, gcp]
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
       # gha-creds-*.json that auth writes into the workspace.
@@ -312,7 +312,7 @@ jobs:
   deploy-app-staging:
     name: Deploy APP-STAGING (rapid-builder-app-stg + rapid-builder-stg)
     needs: ref-guard
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, gcp]
     env:
       # Deliberately NOT named SERVICE / HOSTING_SITE: those are the workflow-level
       # names for the RETIRED tier, and two same-named values in one file is how a

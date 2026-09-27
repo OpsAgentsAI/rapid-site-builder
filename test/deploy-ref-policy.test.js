@@ -192,15 +192,21 @@ test('...and the policy carries no STALE row for a workflow that is gone', () =>
 });
 
 test('a workflow that only DEPLOYS, or only DISPATCHES, is correctly left out', () => {
-  // The cry-wolf control. preview.yml deploys (gcloud builds submit) but fires
-  // on pull_request only, so no operator picks its ref; ci.yml is neither.
-  // Without this, widening the predicate to "deploys" alone would demand a
-  // policy row for every preview build and the guard would be switched off.
+  // The cry-wolf control. Card vpukxEgQ (09PBYCJY rule 2) made preview.yml
+  // dispatchable — it used to be this test's "only deploys" example, on the
+  // reasoning that it fired on pull_request only and no operator picked its
+  // ref. That reasoning no longer holds, which is exactly the card's point:
+  // preview.yml now belongs in the discovered set (and has a policy row, see
+  // the tests above) rather than being excluded by it. divergence-alarm.yml is
+  // the "only dispatches" example instead: workflow_dispatch, but no deploy
+  // verb anywhere in it. ci.yml remains neither.
   const found = discoverDispatchableDeployWorkflows();
-  assert.ok(!found.includes('preview.yml'), 'preview.yml is not dispatchable — no ref to pick');
+  assert.ok(found.includes('preview.yml'),
+    'preview.yml is dispatchable AND deploys since card vpukxEgQ — it must now be discovered, not excluded');
+  assert.ok(!found.includes('divergence-alarm.yml'), 'divergence-alarm.yml is dispatchable but deploys nothing');
   assert.ok(!found.includes('ci.yml'));
-  const preview = readWf('preview.yml');
-  assert.match(preview, DEPLOY_VERBS, 'preview.yml really does deploy — so the exclusion is the DISPATCH half doing the work');
+  const alarm = readWf('divergence-alarm.yml');
+  assert.doesNotMatch(alarm, DEPLOY_VERBS, 'divergence-alarm.yml really does not deploy — so the exclusion is the DEPLOY half doing the work');
 });
 
 test('THE CARD\'S OWN SELF-CATCH: triggers are counted with comments STRIPPED', () => {

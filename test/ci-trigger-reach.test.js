@@ -91,9 +91,21 @@ test('the reason it cannot: real-app genuinely has no ci.yml', () => {
   );
 });
 
+// Card vpukxEgQ (09PBYCJY rule 2): ci.yml gained a `wif-pr-reachability` job as
+// part of closing a same-repo PR identity-mint hole in preview.yml. real-app has
+// its own preview.yml with the SAME defect (it predates this fix and was not
+// forward-ported here — that PR targets main only, real-app's copy is a
+// separate branch this PR cannot reach), so ci-realapp.yml has no matching
+// guard yet. This is a KNOWN, ACKNOWLEDGED, ONE-ROW divergence — not the
+// silent kind this test exists to catch. Forward-porting the rule-2 fix (and
+// this guard) to real-app is real-app's own card to file, not a name to widen
+// here without a reason.
+const KNOWN_DIVERGED_NAMES = new Set(['WIF PR-reachability guard (09PBYCJY rule 2)']);
+
 test('⭐ the two workflows emit the SAME check names — why this was invisible', () => {
-  // The finding, pinned. If these ever diverge, the confusion this card is
-  // about stops being possible and this test says so by failing.
+  // The finding, pinned. If these ever diverge WITHOUT a named, reasoned
+  // exception above, the confusion this card is about stops being possible and
+  // this test says so by failing.
   const realapp = execFileSync('git', ['show', 'origin/real-app:.github/workflows/ci-realapp.yml'], {
     cwd: REPO,
     encoding: 'utf8',
@@ -106,5 +118,18 @@ test('⭐ the two workflows emit the SAME check names — why this was invisible
     shared.includes('test'),
     'the two CI workflows no longer share the `test` job id — the check-name collision that hid this is gone',
   );
-  assert.deepEqual(names(ci), names(realapp), 'the two workflows\' job display names have diverged');
+  const ciNames = names(ci).filter((n) => !KNOWN_DIVERGED_NAMES.has(n));
+  const realappNames = names(realapp).filter((n) => !KNOWN_DIVERGED_NAMES.has(n));
+  assert.deepEqual(ciNames, realappNames,
+    'the two workflows\' job display names have diverged beyond the KNOWN_DIVERGED_NAMES exceptions above');
+  // VACUITY GUARD: an exception set that swallowed a REAL, unintended divergence
+  // would make the filtered comparison above pass over it silently. Every name
+  // in the exception set must actually be present on (at least) one side, or it
+  // is hiding nothing and should be removed.
+  for (const known of KNOWN_DIVERGED_NAMES) {
+    assert.ok(
+      names(ci).includes(known) || names(realapp).includes(known),
+      `KNOWN_DIVERGED_NAMES lists "${known}", which is not on EITHER side any more — stale exception, remove it`,
+    );
+  }
 });

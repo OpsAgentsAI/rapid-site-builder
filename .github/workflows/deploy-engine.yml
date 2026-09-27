@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   deploy-engine:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, gcp]
     steps:
       # checkout MUST precede auth (checkout clean:true wipes the creds file)
       #
