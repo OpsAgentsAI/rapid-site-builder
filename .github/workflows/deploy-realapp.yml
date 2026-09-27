@@ -61,6 +61,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node (absent from the self-hosted pool image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       # ── REF GUARD (card LEBxGF5d) — runs BEFORE auth and BEFORE any deploy ──
       # This workflow is workflow_dispatch-only and deploys whatever ref it is
       # handed. The header above already says it is "NEVER deployed from `main`"

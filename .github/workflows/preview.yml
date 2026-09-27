@@ -77,6 +77,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node (absent from the self-hosted pool image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Refuse a dispatch on any ref that is not on the main line
         env:
           REF_NAME: ${{ github.ref_name }}
