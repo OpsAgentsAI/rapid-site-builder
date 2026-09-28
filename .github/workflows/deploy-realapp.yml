@@ -76,6 +76,14 @@ jobs:
       # Hosting on builder.opsagents.agency). A dispatch from any ref not on
       # this line rolls that surface backwards and reports SUCCESS.
       #
+      # ⚠️ The sentence above — the other copy could only ever refuse — stopped
+      # being true with the #70 ancestry merge (card 8itdTRtX): main is now an ancestor of this branch,
+      # so "on the deploy line" alone would ALLOW a dispatch on main — from
+      # main's copy of this file, onto PROD. The guard therefore asks a second
+      # question, from the policy row: the dispatched commit must NOT be an
+      # ancestor of the forbidden line (main), i.e. it must carry a commit that
+      # only this line has. The same fix is on main so main's copy refuses too.
+      #
       # The decision lives in lib/deployRefPolicy.js so the three-way exit code
       # (0 / 1 / anything-else) cannot be quietly collapsed into two, and so the
       # expected ref has ONE source of truth. Reusing that module rather than
@@ -94,22 +102,39 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp.yml'].expectedRef")
-          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
-            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
-            || true
+          FORBIDDEN=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp.yml'].mustNotBeAncestorOf.join(' ')")
+          for REF in $EXPECTED $FORBIDDEN; do
+            git rev-parse --verify --quiet "refs/remotes/origin/$REF" >/dev/null 2>&1 \
+              || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
+              || true
+          done
           # `|| rc=$?` is LOAD-BEARING: GitHub runs this under `bash -e`, so a
           # bare `--is-ancestor` returning 1 aborts the step before the message
           # naming the right ref is ever printed.
           rc=0
           git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
           echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
-          RC="$rc" node -e '
-            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+          # SECOND HALF (card 8itdTRtX): once the deploy line contains the other
+          # line, being on the deploy line no longer tells the two apart. Each
+          # forbidden line the policy row names is probed the same way, and the
+          # exit codes travel to the decision as REF=CODE pairs — a probe the
+          # policy requires and does not receive is CANNOT VERIFY, not allow.
+          PROBES=""
+          for REF in $FORBIDDEN; do
+            frc=0
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
+            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
+            PROBES="$PROBES $REF=$frc"
+          done
+          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+            const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
             const p = DEPLOY_REF_POLICY["deploy-realapp.yml"];
             const v = refDeployVerdict(process.env.RC, {
+              workflow: "deploy-realapp.yml",
               dispatchedRef: process.env.REF_NAME,
               expectedRef: p.expectedRef,
               tier: p.tier,
+              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
             });
             console.log(v.message);
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
