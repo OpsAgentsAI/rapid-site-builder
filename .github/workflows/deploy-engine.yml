@@ -57,22 +57,40 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-engine.yml'].expectedRef")
-          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
-            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
-            || true
+          FORBIDDEN=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-engine.yml'].mustNotBeAncestorOf.join(' ')")
+          for REF in $EXPECTED $FORBIDDEN; do
+            git rev-parse --verify --quiet "refs/remotes/origin/$REF" >/dev/null 2>&1 \
+              || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
+              || true
+          done
           # `|| rc=$?` is LOAD-BEARING: GitHub runs this under `bash -e`, so a
           # bare `--is-ancestor` returning 1 aborts the step before the message
           # naming the right ref is ever printed.
           rc=0
           git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
           echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
-          RC="$rc" node -e '
-            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+          # SECOND HALF (card 8itdTRtX): once the deploy line contains the other
+          # line, being on the deploy line no longer tells the two apart. Each
+          # forbidden line the policy row names is probed the same way, and the
+          # exit codes travel to the decision as REF=CODE pairs — a probe the
+          # policy requires and does not receive is CANNOT VERIFY, not allow.
+          # (This row names none today; the loop is the shape every guard shares.)
+          PROBES=""
+          for REF in $FORBIDDEN; do
+            frc=0
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
+            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
+            PROBES="$PROBES $REF=$frc"
+          done
+          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+            const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
             const p = DEPLOY_REF_POLICY["deploy-engine.yml"];
             const v = refDeployVerdict(process.env.RC, {
+              workflow: "deploy-engine.yml",
               dispatchedRef: process.env.REF_NAME,
               expectedRef: p.expectedRef,
               tier: p.tier,
+              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
             });
             console.log(v.message);
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
