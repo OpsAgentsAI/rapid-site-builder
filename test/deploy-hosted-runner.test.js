@@ -72,7 +72,11 @@ test('the runner move did not widen who can start a deploy: no pull_request* tri
 
 test('the PROD ref guard still runs BEFORE the WIF auth step on the hosted runner', () => {
   const lines = read('deploy-realapp.yml').split('\n').filter((l) => !/^\s*#/.test(l));
-  const guard = lines.findIndex((l) => /- name: Refuse any ref that is not on the real-app line/.test(l));
+  // Two spellings of the same step: main's copy is "Refuse any ref that is not on the
+  // real-app line" (LEBxGF5d), real-app's is "Refuse a dispatch on any ref that is not
+  // on the deploy line" (22I0yUum / eKfog19I). The ancestry merge (0M55jnpF) carries
+  // real-app's; deploy-ref-policy.test.js already accepts both. Pin the ORDER, not the name.
+  const guard = lines.findIndex((l) => /- name: Refuse (any|a dispatch on any) ref that is not on the (real-app|deploy) line/.test(l));
   const auth = lines.findIndex((l) => /uses: google-github-actions\/auth@/.test(l));
   assert.ok(guard !== -1 && auth !== -1, 'both steps exist');
   assert.ok(guard < auth, 'the ref guard must precede credential minting');
