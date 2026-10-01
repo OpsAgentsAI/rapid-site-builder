@@ -34,6 +34,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node (absent from the self-hosted pool image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       # ── REF GUARD (card eKfog19I) — runs BEFORE auth and BEFORE the deploy ──
       # This workflow is dispatch-only and mints a **NEW** engine every run
       # rather than updating one, then prints a RESOURCE_NAME a human pins into

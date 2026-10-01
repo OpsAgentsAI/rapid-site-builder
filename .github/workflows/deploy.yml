@@ -93,6 +93,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Node (absent from the self-hosted pool image)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Refuse a dispatch on any ref that is not on the main line
         if: github.event_name == 'workflow_dispatch'
         # REF_NAME goes through env:, never inline `${{ }}` in the run: body.
