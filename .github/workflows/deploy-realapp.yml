@@ -48,7 +48,16 @@ env:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card 8itdTRtX (CTO ruling 2026-10-01). This repo is PUBLIC and every org runner group
+    # (Default, gcp-selfhosted, macos-selfhosted, gcp-deploy) has
+    # allows_public_repositories=false, so a job pinned to the pool is never scheduled:
+    # PROD dispatch 36812000483 sat queued ~10 min with no runner and was cancelled.
+    # That flag is NOT to be flipped — it is what keeps fork-PR code off the pool that
+    # holds prod identities. GitHub-hosted minutes are free for a public repo (same
+    # reasoning as ci.yml, card ZikVJXBp). WIF is unchanged: the provider trusts the
+    # repo + ref claims in the OIDC token, not the machine. The ref guard below is
+    # untouched and still runs first.
+    runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
       # gha-creds-*.json that auth writes into the workspace.
