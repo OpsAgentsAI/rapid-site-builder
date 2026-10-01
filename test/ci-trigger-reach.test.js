@@ -5,7 +5,8 @@
  * ── THE DEFECT ─────────────────────────────────────────────────────────────
  * `main`'s ci.yml declared `branches: [main, real-app]` on BOTH `push` and
  * `pull_request`. Both were inert. A workflow file is resolved from the branch
- * that owns the event, and `real-app` has no `ci.yml`:
+ * that owns the event, and `real-app` had no `ci.yml` (it now has main's copy,
+ * which triggers on `main` only — still inert there; see the premise test):
  *
  *   push to real-app            resolves from real-app       -> never runs
  *   pull_request INTO real-app  resolves from the BASE, which IS real-app
@@ -72,19 +73,41 @@ test('ci.yml no longer claims to gate real-app on either event', () => {
   }
 });
 
-test('the reason it cannot: real-app genuinely has no ci.yml', () => {
+test('the reason it cannot: no ci.yml ON real-app fires for real-app', () => {
   // ⚠️ Skips LOUDLY rather than passing on nothing when the ref is absent (a
   // shallow clone or a fork), matching this repo's existing deploy-ref tests.
+  //
+  // PREMISE UPDATE (card ZikVJXBp, 2026-09-30): real-app used to have NO ci.yml.
+  // Since 22909d9 ("merge main into real-app", card xe1q8uHa) it carries main's
+  // ci.yml — whose triggers name only `main`. A workflow resolves from the branch
+  // that owns the event, so on real-app that copy is still INERT: push to
+  // real-app and PRs into real-app never run it. The invariant this card needs
+  // was never "the file is absent"; it is "no ci.yml reachable from real-app
+  // fires for real-app", so real-app is gated ONLY by ci-realapp.yml. That is
+  // what is pinned now.
   const files = workflowsOn('origin/real-app');
   if (!files) {
     console.log('SKIP: origin/real-app not present — cannot verify (needs fetch-depth: 0)');
     return;
   }
   assert.ok(files.length > 0, 'origin/real-app has no workflows at all — measurement is wrong');
-  assert.ok(
-    !files.includes('ci.yml'),
-    'real-app now HAS a ci.yml — the premise of this card changed; re-read before re-adding the branch',
-  );
+  if (files.includes('ci.yml')) {
+    const realappCi = execFileSync('git', ['show', 'origin/real-app:.github/workflows/ci.yml'], {
+      cwd: REPO,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    for (const event of ['push', 'pull_request']) {
+      const branches = triggerBranches(realappCi, event);
+      // CONTROL: an unparseable trigger list must not read as "does not name real-app".
+      assert.ok(branches, `real-app's ci.yml has no ${event}.branches list — cannot tell whether it fires on real-app`);
+      assert.ok(
+        !branches.includes('real-app'),
+        `real-app's ci.yml now FIRES on real-app (${event}) — the premise of this card changed; ` +
+          're-read before re-adding the branch to main\'s ci.yml (real-app would then have two gates emitting the same check names)',
+      );
+    }
+  }
   assert.ok(
     files.includes('ci-realapp.yml'),
     'real-app lost ci-realapp.yml — it is now ungated, which is worse than the clause this card removed',

@@ -57,7 +57,14 @@ jobs:
   # identity-free PR-time checks.
   wif-pr-reachability:
     name: WIF PR-reachability guard (09PBYCJY rule 2)
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card ZikVJXBp (2026-09-28): this repo is PUBLIC, and runner group `gcp-selfhosted` has
+    # allows_public_repositories=false, so GitHub never routes a public repo's job to the pool.
+    # Every pool job here sat `queued` with no runner from 09-18 on. GitHub-hosted minutes are
+    # FREE for public repos (not metered, so the hosted-minutes lock does not apply). Proof:
+    # `CI (real-app)` run 36416903247 went green on ubuntu-latest on 2026-09-28. This job holds
+    # no credential, so a fresh hosted VM is also the most isolated place to run it.
+    # The pool-portable steps below ($RUNNER_TEMP installs, setup-node) work unchanged here.
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +80,14 @@ jobs:
     # self-hosted GCP pool (org runner group `gcp-selfhosted`, this repo is already a member).
     # The pool image has NO node/npm (measured 2026-09-16 on gha-runner-1 over IAP), which is
     # why actions/setup-node below is load-bearing here rather than a version pin.
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card ZikVJXBp (2026-09-28): this repo is PUBLIC, and runner group `gcp-selfhosted` has
+    # allows_public_repositories=false, so GitHub never routes a public repo's job to the pool.
+    # Every pool job here sat `queued` with no runner from 09-18 on. GitHub-hosted minutes are
+    # FREE for public repos (not metered, so the hosted-minutes lock does not apply). Proof:
+    # `CI (real-app)` run 36416903247 went green on ubuntu-latest on 2026-09-28. This job holds
+    # no credential, so a fresh hosted VM is also the most isolated place to run it.
+    # The pool-portable steps below ($RUNNER_TEMP installs, setup-node) work unchanged here.
+    runs-on: ubuntu-latest
     # A queued job on a dead pool is not bounded by this; a RUNNING one is. Hosted average
     # for this job was ~2-4 min; 20 leaves room for `npm ci` on a cold cache.
     timeout-minutes: 20
@@ -115,7 +129,14 @@ jobs:
   workflows:
     name: Lint workflow files
     # Card pfjIs7GO: same hosted-minutes lock as `test` above — moved to the self-hosted pool.
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card ZikVJXBp (2026-09-28): this repo is PUBLIC, and runner group `gcp-selfhosted` has
+    # allows_public_repositories=false, so GitHub never routes a public repo's job to the pool.
+    # Every pool job here sat `queued` with no runner from 09-18 on. GitHub-hosted minutes are
+    # FREE for public repos (not metered, so the hosted-minutes lock does not apply). Proof:
+    # `CI (real-app)` run 36416903247 went green on ubuntu-latest on 2026-09-28. This job holds
+    # no credential, so a fresh hosted VM is also the most isolated place to run it.
+    # The pool-portable steps below ($RUNNER_TEMP installs, setup-node) work unchanged here.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
