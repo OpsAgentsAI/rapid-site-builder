@@ -67,7 +67,16 @@ test('the census is not vacuous — it finds node-running jobs, and some are com
   const rows = auditRepo(REPO_ROOT);
   assert.ok(rows.length >= 8, `census collapsed to ${rows.length} rows — the matcher stopped matching`);
   assert.ok(rows.some((r) => r.guarded), 'no compliant job found at all: the setup-node matcher is broken');
-  assert.ok(rows.every((r) => r.pool), 'a non-pool job appeared; update this assertion rather than the rule');
+  // #101 (ZikVJXBp, 2026-10-01) moved this PUBLIC repo's 5 credential-free jobs to
+  // ubuntu-latest, because the self-hosted group refuses public repos; card
+  // wkTIv0Q2 plans to move them onto an isolated GCP runner. So the census is a
+  // MIX, and "every row is pool" stopped being a fact about the repo. What must
+  // hold is that the rule still has something to bite on: at least one POOL job
+  // runs node, so a pool-scoped guard is not vacuously green.
+  assert.ok(rows.some((r) => r.pool), 'no pool job runs node at all — the pool rule below would pass vacuously');
+  // A hosted row is compliant by definition (the hosted image ships node); it is
+  // counted so the census stays a census, never so it can excuse a pool row.
+  assert.ok(rows.filter((r) => !r.pool).every((r) => r.guarded), 'a hosted job was scored unguarded — the pool scoping broke');
 });
 
 test('every pool job that runs node sets node up first — except pinned, carded debt', () => {
@@ -148,7 +157,12 @@ test('the live-tree parser sees real jobs, not an empty set (fail-loud, not vacu
   const code = loadWorkflow(REPO_ROOT, 'prod-serving-alarm.yml');
   const jobs = jobsOf(code);
   assert.strictEqual(jobs.length, 1, `expected 1 job in prod-serving-alarm.yml, got ${jobs.length}`);
-  assert.strictEqual(runsOnPool(jobs[0]), true, 'the gap-B alarm is no longer on the pool');
   assert.strictEqual(nodeRunSteps(jobs[0]).length, 1, 'the measure step no longer reads as a node invocation');
-  assert.ok(auditJob('prod-serving-alarm.yml', jobs[0]).guarded);
+  // The job's RUNNER is not pinned here: #101 moved it to ubuntu-latest and
+  // wkTIv0Q2 will move it to an isolated GCP runner. What is pinned is the
+  // property that survives either move — it sets node up itself, so landing back
+  // on a node-less image cannot reintroduce the exit-127 this card is about.
+  const row = auditJob('prod-serving-alarm.yml', jobs[0]);
+  assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm no longer sets node up before its first node call');
+  assert.ok(row.guarded, 'the gap-B alarm is scored unguarded');
 });
