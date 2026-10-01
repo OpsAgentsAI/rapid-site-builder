@@ -55,7 +55,14 @@ jobs:
     #
     # Nothing holds it hosted: no WIF, no repo secrets — its only credential is
     # the per-job `github.token`, which all 12 sibling pool jobs also carry.
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card ZikVJXBp (2026-09-28): this repo is PUBLIC, and runner group `gcp-selfhosted` has
+    # allows_public_repositories=false, so GitHub never routes a public repo's job to the pool.
+    # Every pool job here sat `queued` with no runner from 09-18 on. GitHub-hosted minutes are
+    # FREE for public repos (not metered, so the hosted-minutes lock does not apply). Proof:
+    # `CI (real-app)` run 36416903247 went green on ubuntu-latest on 2026-09-28. This job holds
+    # no credential, so a fresh hosted VM is also the most isolated place to run it.
+    # The pool-portable steps below ($RUNNER_TEMP installs, setup-node) work unchanged here.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
