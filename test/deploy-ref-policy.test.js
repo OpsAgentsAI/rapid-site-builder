@@ -74,7 +74,7 @@ const DEPLOY_VERBS =
  * REDS until this table is updated — so closing the gap cannot be done
  * quietly, and neither can widening it.
  */
-const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml', 'deploy.yml']);
+const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml', 'deploy.yml', 'preview.yml']);
 
 /**
  * ⚠️ EMPTY AS OF THE 2026-09-15 RECONCILE (card XUCfQGz6, issue #70) — and the
@@ -192,15 +192,21 @@ test('...and the policy carries no STALE row for a workflow that is gone', () =>
 });
 
 test('a workflow that only DEPLOYS, or only DISPATCHES, is correctly left out', () => {
-  // The cry-wolf control. preview.yml deploys (gcloud builds submit) but fires
-  // on pull_request only, so no operator picks its ref; ci.yml is neither.
-  // Without this, widening the predicate to "deploys" alone would demand a
-  // policy row for every preview build and the guard would be switched off.
+  // The cry-wolf control. Card vpukxEgQ (09PBYCJY rule 2) made preview.yml
+  // dispatchable — it used to be this test's "only deploys" example, on the
+  // reasoning that it fired on pull_request only and no operator picked its
+  // ref. That reasoning no longer holds, which is exactly the card's point:
+  // preview.yml now belongs in the discovered set (and has a policy row, see
+  // the tests above) rather than being excluded by it. divergence-alarm.yml is
+  // the "only dispatches" example instead: workflow_dispatch, but no deploy
+  // verb anywhere in it. ci.yml remains neither.
   const found = discoverDispatchableDeployWorkflows();
-  assert.ok(!found.includes('preview.yml'), 'preview.yml is not dispatchable — no ref to pick');
+  assert.ok(found.includes('preview.yml'),
+    'preview.yml is dispatchable AND deploys since card vpukxEgQ — it must now be discovered, not excluded');
+  assert.ok(!found.includes('divergence-alarm.yml'), 'divergence-alarm.yml is dispatchable but deploys nothing');
   assert.ok(!found.includes('ci.yml'));
-  const preview = readWf('preview.yml');
-  assert.match(preview, DEPLOY_VERBS, 'preview.yml really does deploy — so the exclusion is the DISPATCH half doing the work');
+  const alarm = readWf('divergence-alarm.yml');
+  assert.doesNotMatch(alarm, DEPLOY_VERBS, 'divergence-alarm.yml really does not deploy — so the exclusion is the DEPLOY half doing the work');
 });
 
 test('THE CARD\'S OWN SELF-CATCH: triggers are counted with comments STRIPPED', () => {
@@ -653,29 +659,60 @@ test('KNOWN-POSITIVE: a dispatch ON the expected ref is ALLOWED, on real git sta
     return;
   }
 
+  // Card 8itdTRtX: the decision now asks TWO git questions for this row — on
+  // the deploy line, AND not on the main line. Both are asked here exactly as
+  // the workflow asks them, so this stays "the whole guard minus gcloud".
+  const dangerous = resolve('main');
+  if (!dangerous) {
+    console.log('SKIP: need main locally (shallow clone?)');
+    return;
+  }
+  const probesFor = (sha) => [
+    { ref: 'main', exitCode: spawnSync('git', ['merge-base', '--is-ancestor', sha, dangerous], { cwd: REPO }).status },
+  ];
+
   // (a) The literal legitimate dispatch: HEAD is the branch tip, so the tip is
-  //     trivially an ancestor of itself — exit 0.
+  //     trivially an ancestor of itself — exit 0 — and it carries the
+  //     deploy-line-only commits, so it is NOT an ancestor of main — exit 1.
   const atTip = spawnSync('git', ['merge-base', '--is-ancestor', expected, expected], { cwd: REPO }).status;
   assert.equal(atTip, 0, 'the expected ref is not an ancestor of itself — git is not answering');
-  const vTip = refDeployVerdict(atTip, { dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier });
+  assert.equal(probesFor(expected)[0].exitCode, 1, `${p.expectedRef} IS an ancestor of main — the deploy line has collapsed into main; re-decide the row (see test/deploy-line-guard.test.js)`);
+  const vTip = refDeployVerdict(atTip, { workflow: 'deploy-realapp.yml', dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier, forbidden: probesFor(expected) });
   assert.equal(vTip.allow, true, `a dispatch on ${p.expectedRef} was REFUSED: ${vTip.message}`);
 
   // (b) …and not only by equality. An earlier commit on the same line is a
   //     genuine ancestor, so the allow path is reachable for a real range of
-  //     refs and not just the degenerate one.
+  //     refs and not just the degenerate one — PROVIDED that commit is itself
+  //     off the main line. A parent that is on main (a pre-split commit) is
+  //     correctly refused, and the verdict must track that too, so the
+  //     expectation is derived from the second probe rather than assumed.
   const parent = spawnSync('git', ['rev-parse', '--verify', '--quiet', `${expected}~1`], { cwd: REPO });
   if (parent.status === 0) {
     const sha = parent.stdout.toString().trim();
     const rc = spawnSync('git', ['merge-base', '--is-ancestor', sha, expected], { cwd: REPO }).status;
     assert.equal(rc, 0, 'a parent commit is not an ancestor of its own branch tip — git is not answering');
-    const v = refDeployVerdict(rc, { dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier });
-    assert.equal(v.allow, true, `a genuine ancestor of ${p.expectedRef} was REFUSED: ${v.message}`);
+    const probes = probesFor(sha);
+    const v = refDeployVerdict(rc, { workflow: 'deploy-realapp.yml', dispatchedRef: p.expectedRef, expectedRef: p.expectedRef, tier: p.tier, forbidden: probes });
+    if (probes[0].exitCode === 1) {
+      assert.equal(v.allow, true, `a genuine ancestor of ${p.expectedRef} that is off the main line was REFUSED: ${v.message}`);
+    } else {
+      assert.equal(v.allow, false, `${sha} is on BOTH lines and was allowed onto PROD: ${v.message}`);
+      assert.equal(v.reason, 'shared-line');
+    }
   }
 });
 
-test('KNOWN-POSITIVE CONTROL: the same decision still REFUSES the dangerous ref', () => {
+test('KNOWN-POSITIVE CONTROL: the same decision still REFUSES the dangerous ref — in BOTH worlds', () => {
   // Without this arm the test above is satisfied by a decision that allows
   // everything — which is the failure mode a PROD guard must never have.
+  //
+  // ⚠️ RETARGETED (card 8itdTRtX, opsagents-cto on PR #98 @ 1869afd). This
+  // used to assert `is-ancestor main real-app` exits 1 — "the branches have
+  // converged, re-read this test". PR #98 makes them converge ON PURPOSE, so
+  // that assertion would red real-app CI on the first push after the merge
+  // while asserting nothing about the guard. The invariant that survives the
+  // merge is the VERDICT: main is refused — by the first probe before the merge
+  // (not on the line), by the second after it (on the line, but on main too).
   const p = DEPLOY_REF_POLICY['deploy-realapp.yml'];
   const expected = resolve(p.expectedRef);
   const dangerous = resolve('main');
@@ -683,9 +720,18 @@ test('KNOWN-POSITIVE CONTROL: the same decision still REFUSES the dangerous ref'
     console.log('SKIP: need both refs locally (shallow clone?)');
     return;
   }
-  const rc = spawnSync('git', ['merge-base', '--is-ancestor', dangerous, expected], { cwd: REPO }).status;
-  assert.equal(rc, 1, 'main IS an ancestor of the deploy line — the branches have converged, re-read this test');
-  const v = refDeployVerdict(rc, { dispatchedRef: 'main', expectedRef: p.expectedRef, tier: p.tier });
-  assert.equal(v.allow, false, 'a dispatch on main was ALLOWED onto the PROD surface');
+  const onLine = spawnSync('git', ['merge-base', '--is-ancestor', dangerous, expected], { cwd: REPO }).status;
+  const onMain = spawnSync('git', ['merge-base', '--is-ancestor', dangerous, dangerous], { cwd: REPO }).status;
+  assert.ok(onLine === 0 || onLine === 1, `git could not answer is-ancestor main ${p.expectedRef} (exit ${onLine})`);
+  assert.equal(onMain, 0, 'main is not an ancestor of itself — git is not answering');
+  const v = refDeployVerdict(onLine, { workflow: 'deploy-realapp.yml', dispatchedRef: 'main', expectedRef: p.expectedRef, tier: p.tier, forbidden: [{ ref: 'main', exitCode: onMain }] });
+  assert.equal(v.allow, false, `a dispatch on main was ALLOWED onto the PROD surface (is-ancestor main ${p.expectedRef} -> ${onLine}): ${v.message}`);
+  assert.equal(v.verdict, 'refuse');
+  assert.equal(v.reason, onLine === 0 ? 'shared-line' : 'off-line');
   assert.match(v.message, new RegExp(p.expectedRef), 'the refusal must name the ref to re-dispatch with');
+  // And the one-probe call this test used to make is no longer an allow either
+  // — it is the fail-open, and it must now come back cannot-verify.
+  const onePro = refDeployVerdict(0, { dispatchedRef: 'main', expectedRef: p.expectedRef, tier: p.tier });
+  assert.equal(onePro.allow, false, 'exit 0 alone allowed main onto PROD — the second half is not being enforced');
+  assert.equal(onePro.verdict, 'cannot-verify');
 });

@@ -171,3 +171,169 @@ test('LIVE REFS: the instrument can see history (asserts nothing about agreement
   // branches agree is the scheduled workflow's business, not this suite's.
   assert.notEqual(v.verdict, 'cannot-verify', v.message);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Card s0qMA0O7 — THE BASELINE.
+//
+// The alarm was RED on five consecutive runs. Red for a TRUE reason (the backlog
+// card xe1q8uHa owns), and therefore useless: the next real divergence is line 40
+// of a list nobody is draining. This block pins the fix, and pins it in BOTH
+// directions, because "a verdict that can only come back red" and "a verdict that
+// can only come back green" are the same defect facing opposite ways — the second
+// is what a careless baseline turns the first into.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const KNOWN_A = 'a1'.repeat(20);
+const KNOWN_B = 'b2'.repeat(20);
+const FRESH = 'f9'.repeat(20);
+const backlog = [
+  commit(KNOWN_A, 'feat: known stranded work', ['lib/known.js']),
+  commit(KNOWN_B, 'feat: more known stranded work', ['server.js']),
+];
+const BASELINE = { commits: [KNOWN_A, KNOWN_B], paths: ['lib/known.js', 'server.js'] };
+
+test('s0qMA0O7 KNOWN-NEGATIVE — with the backlog baselined the verdict is GREEN', () => {
+  const r = classifyUnreachableWork(
+    measure({ unreachable: backlog, sourceOnlyPaths: ['lib/known.js', 'server.js'], baseline: BASELINE }),
+  );
+  assert.equal(r.verdict, 'ok');
+  assert.equal(r.alarm, false, 'the acknowledged backlog must not keep the alarm permanently red');
+  assert.equal(r.newProductCommits.length, 0);
+  assert.equal(r.newProductPaths.length, 0);
+});
+
+test('s0qMA0O7 — …and GREEN still SAYS the backlog is outstanding, so quiet ≠ gone', () => {
+  // The failure a lazy baseline produces: the alarm goes quiet and the reader
+  // concludes the work shipped. The count has to survive into the green message.
+  const r = classifyUnreachableWork(
+    measure({ unreachable: backlog, sourceOnlyPaths: ['lib/known.js', 'server.js'], baseline: BASELINE }),
+  );
+  assert.equal(r.acknowledgedProductCount, 2);
+  assert.equal(r.acknowledgedPathCount, 2);
+  assert.match(r.message, /Acknowledged backlog still outstanding: 2 product commit\(s\)/);
+  assert.match(r.message, /xe1q8uHa/, 'the green message must still name who owns draining it');
+});
+
+test('s0qMA0O7 KNOWN-POSITIVE — one NEW unreachable product commit goes RED and NAMES it', () => {
+  const r = classifyUnreachableWork(
+    measure({
+      unreachable: [...backlog, commit(FRESH, 'feat: brand new stranded work', ['lib/fresh.js'])],
+      sourceOnlyPaths: ['lib/known.js', 'server.js'],
+      baseline: BASELINE,
+    }),
+  );
+  assert.equal(r.verdict, 'alarm');
+  assert.equal(r.alarm, true);
+  assert.deepEqual(r.newProductCommits.map((c) => c.sha), [FRESH], 'the NEW commit must be isolated from the backlog');
+  assert.match(r.message, /1 NEW product commit/);
+  // …and the backlog must not be re-litigated as if it were the new event.
+  assert.equal(r.acknowledgedProductCount, 2);
+});
+
+test('s0qMA0O7 AC-3 — TREE presence is its own signal: a new source-only file reds on its own', () => {
+  // No new COMMIT at all — every commit is baselined. A file present on source and
+  // absent on target is exactly the case the card says today's alarm cannot report
+  // (`lib/deployRefPolicy.js`), because it is inferred from a 39-line commit list
+  // or not at all.
+  const r = classifyUnreachableWork(
+    measure({
+      unreachable: backlog,
+      sourceOnlyPaths: ['lib/known.js', 'server.js', 'lib/deployRefPolicy.js'],
+      baseline: BASELINE,
+    }),
+  );
+  assert.equal(r.verdict, 'alarm');
+  assert.equal(r.newProductCommits.length, 0, 'this fires on tree presence alone, not on reachability');
+  assert.deepEqual(r.newProductPaths, ['lib/deployRefPolicy.js']);
+  assert.match(r.message, /1 NEW product file\(s\)/);
+});
+
+test('s0qMA0O7 — a CI-only new file does NOT red, so the tree signal keeps the product/CI line', () => {
+  const r = classifyUnreachableWork(
+    measure({
+      unreachable: backlog,
+      sourceOnlyPaths: ['lib/known.js', 'server.js', '.github/workflows/new.yml', 'docs/new.md'],
+      baseline: BASELINE,
+    }),
+  );
+  assert.equal(r.verdict, 'ok', 'a workflow or a doc changes no served byte');
+  assert.deepEqual(r.newProductPaths, []);
+});
+
+test('s0qMA0O7 — the baseline CANNOT pre-acknowledge work that does not exist yet', () => {
+  // The property that keeps a pinned list from becoming a blanket exemption: it
+  // matches by exact sha/path, so a future commit is new by construction. Stated
+  // as a test because "it is a pinned list" is the whole safety argument.
+  const overreaching = { commits: [KNOWN_A, KNOWN_B, 'c3'.repeat(20)], paths: [...BASELINE.paths, 'lib/never.js'] };
+  const r = classifyUnreachableWork(
+    measure({
+      unreachable: [...backlog, commit(FRESH, 'feat: brand new', ['lib/fresh.js'])],
+      sourceOnlyPaths: ['lib/known.js', 'server.js', 'lib/fresh.js'],
+      baseline: overreaching,
+    }),
+  );
+  assert.equal(r.verdict, 'alarm', 'a baseline listing unrelated shas must not cover a genuinely new commit');
+  assert.deepEqual(r.newProductCommits.map((c) => c.sha), [FRESH]);
+  assert.deepEqual(r.newProductPaths, ['lib/fresh.js']);
+});
+
+test('s0qMA0O7 — a DRAINED backlog is reported as stale baseline entries, so the file gets pruned', () => {
+  // Without this the baseline only ever grows, and a stale acknowledgement is a
+  // standing exemption for a sha that may be reused by nothing — but the file
+  // stops describing reality, and the next reader cannot tell what is live.
+  const r = classifyUnreachableWork(
+    measure({ unreachable: [], sourceOnlyPaths: [], baseline: BASELINE }),
+  );
+  assert.equal(r.verdict, 'ok');
+  assert.deepEqual(r.staleBaselineCommits.sort(), [KNOWN_A, KNOWN_B].sort());
+  assert.deepEqual(r.staleBaselinePaths.sort(), ['lib/known.js', 'server.js'].sort());
+  assert.match(r.message, /no longer apply/);
+});
+
+test('s0qMA0O7 — NO baseline means everything counts as new (it must not fail OPEN)', () => {
+  // A missing/garbled file must not read as "nothing is acknowledged, all clear".
+  // ⚠️ The non-iterable shapes are the ones that matter and the ones a mutation
+  // probe caught me missing: a hand-edited baseline whose `commits` is an OBJECT
+  // makes a naive `new Set(b.commits)` THROW, which takes the whole alarm down
+  // rather than degrading to "nothing acknowledged". A detector that crashes on
+  // its own config file is not fail-safe, it is just off.
+  for (const b of [
+    undefined,
+    null,
+    {},
+    { commits: 'nope' },
+    { commits: [null, 7] },
+    { commits: {} },
+    { commits: 42, paths: {} },
+    { commits: { '0': 'x' }, paths: 'lib/known.js' },
+  ]) {
+    let r;
+    assert.doesNotThrow(() => {
+      r = classifyUnreachableWork(measure({ unreachable: backlog, sourceOnlyPaths: [], baseline: b }));
+    }, `baseline ${JSON.stringify(b)} must degrade, never throw`);
+    assert.equal(r.verdict, 'alarm', `baseline ${JSON.stringify(b)} must not silently acknowledge anything`);
+    assert.equal(r.newProductCommits.length, 2);
+  }
+});
+
+test('s0qMA0O7 — cannot-verify still outranks the baseline', () => {
+  // The baseline changes WHICH unreachable work alarms. It must never be able to
+  // turn "I could not measure" into a pass — that is the older, worse failure.
+  const r = classifyUnreachableWork(
+    measure({ targetSha: null, unreachable: backlog, sourceOnlyPaths: [], baseline: BASELINE }),
+  );
+  assert.equal(r.verdict, 'cannot-verify');
+  assert.equal(r.alarm, true);
+});
+
+test('s0qMA0O7 — the committed baseline file is real, and matches the shape the lib reads', () => {
+  // Guards the seam between the generator and the consumer: a baseline that
+  // parses but carries no entries would silently alarm on the whole backlog.
+  const b = require('../divergence-baseline.json');
+  assert.equal(b.source, 'main');
+  assert.equal(b.target, 'real-app');
+  assert.ok(Array.isArray(b.commits) && b.commits.length > 10, `baseline has ${b.commits && b.commits.length} commits`);
+  assert.ok(Array.isArray(b.paths) && b.paths.length > 10, `baseline has ${b.paths && b.paths.length} paths`);
+  assert.ok(b.commits.every((s) => /^[0-9a-f]{40}$/.test(s)), 'every baselined commit is a full sha');
+  assert.match(b.acknowledgedAt, /^\d{4}-\d{2}-\d{2}$/);
+});
