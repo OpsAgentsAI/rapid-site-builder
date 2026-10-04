@@ -326,8 +326,8 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
         <div class="live-url" id="live"><span data-i18n="live.label">Live:</span> <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px" data-i18n="copy">Copy</button></div>
         <div class="upgrade" id="upgrade" hidden>
           <strong data-i18n="upgrade.title">Your site is live — free, for good.</strong>
-          <p data-i18n="upgrade.body">Keep your agent team editing it, put it on your own domain and remove the badge: $19/mo (+$12 per extra site).</p>
-          <a class="btn primary" id="upgrade-cta" target="_blank" rel="noopener" data-i18n="upgrade.cta">Upgrade — $19/mo</a>
+          <p id="upgrade-body"></p>
+          <a class="btn primary" id="upgrade-cta" target="_blank" rel="noopener"></a>
         </div>
       </div>
       <aside class="side-col">
@@ -699,22 +699,40 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
 
   // Card uLLFw04n: the paid moment. A free site stays live for good; the
   // offer shows right after publish, where intent is highest. The CTA goes to
-  // the live $19 plan on /pricing until the PayPal subscription slice lands.
+  // the live plan on /pricing until the PayPal subscription slice lands.
+  // The price comes ONLY from /api/price (the products server's row, CTO ruling
+  // 5399696225): no literal price lives in web/. If it cannot be read, the
+  // offer stays hidden and no event fires.
   // `begin_checkout` is deliberately NOT fired here: a click that only reaches
   // a pricing page is not a checkout, and that event belongs to the PayPal slice.
   const UPGRADE_URL = 'https://opsagents.agency/pricing?utm_source=rsb&utm_medium=post_publish#sku-rapid-site-builder';
-  function upgradeEvent(name, siteId) {
-    const p = { site_id: siteId, plan: 'rsb-monthly', value: 19, currency: 'USD' };
+  function upgradeEvent(name, siteId, price) {
+    const p = { site_id: siteId, plan: 'rsb-monthly', value: price.amount, currency: price.currency };
     try { if (window.rsbTrack) rsbTrack(name, p); } catch (_) {}
     try { if (window.rsbPH) rsbPH(name, p); } catch (_) {}
   }
-  function showUpgrade(siteId) {
+  function fmtMoney(amount, currency) {
+    const lang = document.documentElement.lang === 'he' ? 'he-IL' : 'en-US';
+    return new Intl.NumberFormat(lang, { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+  }
+  function fillPrice(key, price) {
+    return T(key, { price: fmtMoney(price.amount, price.currency), extra: fmtMoney(price.extra, price.currency) });
+  }
+  async function showUpgrade(siteId) {
     const box = $('upgrade');
     if (!box) return;
+    let price = null;
+    try {
+      const r = await fetch('/api/price', { cache: 'no-store' });
+      if (r.ok) price = await r.json();
+    } catch (_) { price = null; }
+    if (!price || !(price.amount > 0) || !(price.extra > 0) || !price.currency) return; // no price, no offer
+    $('upgrade-body').textContent = fillPrice('upgrade.body', price);
+    $('upgrade-cta').textContent = fillPrice('upgrade.cta', price);
     $('upgrade-cta').href = UPGRADE_URL;
-    $('upgrade-cta').onclick = () => upgradeEvent('rsb_upgrade_click', siteId);
+    $('upgrade-cta').onclick = () => upgradeEvent('rsb_upgrade_click', siteId, price);
     box.hidden = false;
-    upgradeEvent('rsb_upgrade_shown', siteId);
+    upgradeEvent('rsb_upgrade_shown', siteId, price);
   }
 
   async function publish() {
