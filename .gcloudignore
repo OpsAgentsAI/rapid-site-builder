@@ -1,0 +1,14 @@
+# Card osLDRRqj (org census 8VXvUrQ5): `google-github-actions/auth` writes
+# gha-creds-<hash>.json into the workspace, and every `gcloud run deploy --source .` /
+# `gcloud builds submit .` in .github/workflows (deploy.yml, deploy-realapp.yml, preview.yml)
+# uploads the workspace root after it.
+#
+# Once a .gcloudignore exists gcloud uses ONLY its contents, so this file restates the
+# lines of gcloud's generated default (.gcloudignore, .git, .gitignore, #!include:.gitignore)
+# and adds the credentials file. Dropping .git would ship full history plus actions/checkout's
+# persisted token. create_credentials_file: false is NOT an option: later gcloud steps read it.
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
+gha-creds-*.json
