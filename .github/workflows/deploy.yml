@@ -87,7 +87,13 @@ jobs:
   # with nothing in the diff to say why. A constant 0 is correct and boring.
   ref-guard:
     name: Ref guard (dispatch only)
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card 8itdTRtX (CTO ruling 2026-10-01): all three jobs in this file run on
+    # GitHub-hosted runners. The repo is PUBLIC and every org runner group has
+    # allows_public_repositories=false, so a pool-pinned job here is never scheduled
+    # (deploy-realapp dispatch 36812000483 queued ~10 min, cancelled). The flag stays
+    # false — it keeps fork-PR code off the pool that holds prod identities. Hosted
+    # minutes are free for a public repo (ci.yml, card ZikVJXBp). WIF is unchanged.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,9 +109,12 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy.yml'].expectedRef")
-          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
-            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
-            || true
+          FORBIDDEN=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy.yml'].mustNotBeAncestorOf.join(' ')")
+          for REF in $EXPECTED $FORBIDDEN; do
+            git rev-parse --verify --quiet "refs/remotes/origin/$REF" >/dev/null 2>&1 \
+              || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
+              || true
+          done
           # `|| rc=$?` is LOAD-BEARING, not style. GitHub runs this with `bash -e`,
           # so a bare `--is-ancestor` returning 1 aborts the step on the spot —
           # fail-closed, but with a generic runner error and none of the message
@@ -113,13 +122,28 @@ jobs:
           rc=0
           git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
           echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
-          RC="$rc" node -e '
-            const { refDeployVerdict, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+          # SECOND HALF (card 8itdTRtX): once the deploy line contains the other
+          # line, being on the deploy line no longer tells the two apart. Each
+          # forbidden line the policy row names is probed the same way, and the
+          # exit codes travel to the decision as REF=CODE pairs — a probe the
+          # policy requires and does not receive is CANNOT VERIFY, not allow.
+          # (This row names none today; the loop is the shape every guard shares.)
+          PROBES=""
+          for REF in $FORBIDDEN; do
+            frc=0
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
+            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
+            PROBES="$PROBES $REF=$frc"
+          done
+          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+            const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
             const p = DEPLOY_REF_POLICY["deploy.yml"];
             const v = refDeployVerdict(process.env.RC, {
+              workflow: "deploy.yml",
               dispatchedRef: process.env.REF_NAME,
               expectedRef: p.expectedRef,
               tier: p.tier,
+              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
             });
             console.log(v.message);
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
@@ -141,7 +165,7 @@ jobs:
   deploy-staging:
     name: Deploy RETIRED hackathon surface (rapid-builder-proxy + rapid-site-builder)
     needs: ref-guard
-    runs-on: [self-hosted, linux, x64, gcp]
+    runs-on: ubuntu-latest  # card 8itdTRtX — see ref-guard above
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
       # gha-creds-*.json that auth writes into the workspace.
@@ -184,7 +208,7 @@ jobs:
             --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
             --allow-unauthenticated \
             --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
-            --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|PUBLIC_BASE_URL=https://rapid-site-builder.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-site-builder.web.app,https://rapid-site-builder-he.web.app|GA4_MEASUREMENT_ID=G-T8S1JFMTH3|RETIRE_UNGATED=1|CANONICAL_APP_URL=https://builder.opsagents.agency" \
+            --set-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|PUBLIC_BASE_URL=https://rapid-site-builder.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-site-builder.web.app,https://rapid-site-builder-he.web.app|RETIRE_UNGATED=1|CANONICAL_APP_URL=https://builder.opsagents.agency" \
             --quiet
           # deploy does not promote traffic when a pin exists — promote explicitly
           gcloud run services update-traffic "$SERVICE" --to-latest \
@@ -308,7 +332,7 @@ jobs:
   deploy-app-staging:
     name: Deploy APP-STAGING (rapid-builder-app-stg + rapid-builder-stg)
     needs: ref-guard
-    runs-on: [self-hosted, linux, x64, gcp]
+    runs-on: ubuntu-latest  # card 8itdTRtX — see ref-guard above
     env:
       # Deliberately NOT named SERVICE / HOSTING_SITE: those are the workflow-level
       # names for the RETIRED tier, and two same-named values in one file is how a

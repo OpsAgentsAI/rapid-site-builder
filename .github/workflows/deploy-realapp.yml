@@ -48,7 +48,16 @@ env:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, gcp]
+    # Card 8itdTRtX (CTO ruling 2026-10-01). This repo is PUBLIC and every org runner group
+    # (Default, gcp-selfhosted, macos-selfhosted, gcp-deploy) has
+    # allows_public_repositories=false, so a job pinned to the pool is never scheduled:
+    # PROD dispatch 36812000483 sat queued ~10 min with no runner and was cancelled.
+    # That flag is NOT to be flipped — it is what keeps fork-PR code off the pool that
+    # holds prod identities. GitHub-hosted minutes are free for a public repo (same
+    # reasoning as ci.yml, card ZikVJXBp). WIF is unchanged: the provider trusts the
+    # repo + ref claims in the OIDC token, not the machine. The ref guard below is
+    # untouched and still runs first.
+    runs-on: ubuntu-latest
     steps:
       # checkout MUST precede auth: checkout(clean:true) would wipe the
       # gha-creds-*.json that auth writes into the workspace.
@@ -87,9 +96,12 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           EXPECTED=$(node -p "require('./lib/realappRefGuard').EXPECTED_REF")
-          git rev-parse --verify --quiet "refs/remotes/origin/$EXPECTED" >/dev/null 2>&1 \
-            || git fetch --no-tags --quiet origin "+refs/heads/$EXPECTED:refs/remotes/origin/$EXPECTED" \
-            || true
+          FORBIDDEN=$(node -p "require('./lib/realappRefGuard').DEPLOY_REF_POLICY['deploy-realapp.yml'].mustNotBeAncestorOf.join(' ')")
+          for REF in $EXPECTED $FORBIDDEN; do
+            git rev-parse --verify --quiet "refs/remotes/origin/$REF" >/dev/null 2>&1 \
+              || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
+              || true
+          done
           # `|| rc=$?` is LOAD-BEARING, not style. GitHub runs this with
           # `bash -e`, so a bare `--is-ancestor` returning 1 would abort the step
           # on the spot — fail-closed, but with a generic runner error and none
@@ -98,9 +110,25 @@ jobs:
           rc=0
           git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
           echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
-          RC="$rc" node -e '
-            const { refDeployVerdict } = require("./lib/realappRefGuard");
-            const v = refDeployVerdict(process.env.RC, { dispatchedRef: process.env.REF_NAME });
+          # SECOND HALF (card 8itdTRtX): once the deploy line contains the other
+          # line, being on the deploy line no longer tells the two apart. Each
+          # forbidden line the policy row names is probed the same way, and the
+          # exit codes travel to the decision as REF=CODE pairs — a probe the
+          # policy requires and does not receive is CANNOT VERIFY, not allow.
+          PROBES=""
+          for REF in $FORBIDDEN; do
+            frc=0
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
+            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
+            PROBES="$PROBES $REF=$frc"
+          done
+          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+            const { refDeployVerdict, parseForbiddenProbes } = require("./lib/realappRefGuard");
+            const v = refDeployVerdict(process.env.RC, {
+              workflow: "deploy-realapp.yml",
+              dispatchedRef: process.env.REF_NAME,
+              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
+            });
             console.log(v.message);
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
           '
