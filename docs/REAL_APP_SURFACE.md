@@ -9,7 +9,11 @@ ungated/unrated and unchanged.
 | Surface | Branch | Deploy | Cloud Run | URL | Auth |
 |---|---|---|---|---|---|
 | Hackathon (submission) | `main` | `deploy.yml` (push→main) | `rapid-builder-proxy` | rapid-site-builder.web.app | **OFF** (dormant, fail-closed) |
-| Real app | `real-app` | `deploy-realapp.yml` (manual dispatch) | `rapid-builder-app` | rapid-site-builder-app.web.app | **ON** |
+| Real app | `real-app` | `deploy-realapp.yml` (manual dispatch) | `rapid-builder-app` | **builder.opsagents.agency** (primary custom domain) · rapid-site-builder-app.web.app (Hosting site behind it) | **ON** |
+
+**The primary URL is `https://builder.opsagents.agency`** (custom domain on Hosting site
+`rapid-site-builder-app`, see `docs/RUNBOOKS/prod-cutover.md`). Link, canonicalise and
+health-check against it; the `web.app` host is the fallback and the second probe.
 
 The login-gate code (`lib/auth.js`, the `/api/auth-config` + publish gate in
 `server.js`) is already merged to `main` and **dormant** there — it only

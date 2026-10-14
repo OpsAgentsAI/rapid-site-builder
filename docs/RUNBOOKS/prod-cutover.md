@@ -51,12 +51,17 @@ read-modify-write (operator step below).
 
 | Resource | Name |
 |---|---|
-| Uptime check | `rsb-app-health` (`uptimeCheckConfigs/rsb-app-health-sbaDoJ3eZAM`) — HTTPS GET `rapid-site-builder-app.web.app/api/health`, every 5 min |
+| Uptime check (custom domain) | `rsb-custom-domain-health` (`uptimeCheckConfigs/rsb-custom-domain-health-V8oTvTEQU0g`) — HTTPS GET `builder.opsagents.agency/api/health`, every 5 min, SSL validated (card LfD3DX9h, 2026-10-14) |
+| Alert policy (custom domain) | "RSB custom domain health — uptime failure" (`alertPolicies/1930868611889872791`) — same threshold and channel as below |
+| Uptime check (Hosting site) | `rsb-app-health` (`uptimeCheckConfigs/rsb-app-health-sbaDoJ3eZAM`) — HTTPS GET `rapid-site-builder-app.web.app/api/health`, every 5 min |
 | Alert policy | "RSB app health — uptime failure" (`alertPolicies/17390205511968936217`) — fires after ~10 min of failing checks |
 | Notification channel | email → michal@opsagents.agency (`notificationChannels/6977929500789877269`) |
 
-The check targets the stable `web.app` host (never TLS-blocked by the custom
-domain's cert lifecycle). `/api/health` also asserts `agentEngine`, buckets,
+There are two checks on purpose. `builder.opsagents.agency` is the URL users,
+demo decks and launch directories are given, so it is the one that must be
+proved. The `web.app` check stays because it is never TLS-blocked by the custom
+domain's cert lifecycle: **custom-domain red + web.app green = the domain
+mapping or its certificate lapsed, not the app.** Both red = the app is down. `/api/health` also asserts `agentEngine`, buckets,
 and `auth:true` — a deploy that silently loses auth env flips the check red.
 
 ## Abuse caps (this PR)

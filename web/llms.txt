@@ -11,6 +11,6 @@ Rapid Site Builder is an AI-agent web team: an orchestrator (Theo) coordinates r
 - LLM-EO: every published site ships AI-discoverable — llms.txt, JSON-LD structured data, crawlable server-rendered HTML
 
 ## Links
-- [Build a site](https://rapid-site-builder.web.app/)
-- [Agents dashboard](https://rapid-site-builder.web.app/board)
+- [Build a site](https://builder.opsagents.agency/)
+- [Agents dashboard](https://builder.opsagents.agency/board)
 - [Source (Apache-2.0)](https://github.com/OpsAgentsAI/rapid-site-builder)

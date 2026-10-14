@@ -44,7 +44,12 @@ env:
   REGION: us-central1
   SERVICE: rapid-builder-app
   HOSTING_SITE: rapid-site-builder-app
-  APP_URL: https://rapid-site-builder-app.web.app
+  # APP_URL is the CUSTOM DOMAIN (card LfD3DX9h): it is the URL users, decks and
+  # launch directories are given, so it is the one the post-deploy probe must prove.
+  # HOSTING_URL is the Hosting site behind it, probed second so a lapsed custom-domain
+  # mapping reads differently from a dead app (same pairing as check-canonical-live.js).
+  APP_URL: https://builder.opsagents.agency
+  HOSTING_URL: https://rapid-site-builder-app.web.app
 
 jobs:
   deploy:
@@ -245,7 +250,8 @@ jobs:
       - name: Smoke test Hosting
         run: |
           sleep 5
-          curl -sf -o /dev/null -w "hosting: %{http_code}\n" "$APP_URL/api/health"
+          curl -sf -o /dev/null -w "custom domain: %{http_code}\n" "$APP_URL/api/health"
+          curl -sf -o /dev/null -w "hosting: %{http_code}\n" "$HOSTING_URL/api/health"
 
       # ── PROVENANCE (cards 22I0yUum / eKfog19I) ─────────────────────────────
       # The PROD surface's URL is stable, so after the fact nothing in the run
