@@ -1025,6 +1025,16 @@ app.get('/api/health', (_req, res) => res.json({
 // PostHog (card u4xmePAo): the project key + ingest host read by web/posthog.js.
 // Empty key → posthog-js stays a no-op. NEVER a personal phx_ key — a project
 // key (phc_…) for an OpsAgents PostHog project, bound at deploy by an operator.
+// Card uLLFw04n: the post-publish offer's price, read from the products server
+// (/v1/products) — never a literal. 503 means "hide the offer".
+const readRsbPrice = require('./lib/pricing').makePriceReader();
+app.get('/api/price', async (_req, res) => {
+  const price = await readRsbPrice();
+  res.set('Cache-Control', 'no-store');
+  if (!price) return res.status(503).json({ error: 'price_unavailable' });
+  res.json(price);
+});
+
 app.get('/api/client-config', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=300');
   res.json({

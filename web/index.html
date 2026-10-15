@@ -193,6 +193,10 @@ select option{font-family:var(--font-body);color:var(--ink);background:var(--sur
 .btn.ghost:hover{border-color:var(--brand-orange);color:var(--brand-orange)}
 .live-url{display:none;align-items:center;gap:10px;background:var(--status-healthy-soft);border:1px solid color-mix(in srgb,var(--status-healthy) 40%,transparent);border-radius:var(--radius-md);padding:12px 16px;font-family:var(--font-mono);font-size:13.5px;flex-wrap:wrap;color:var(--status-healthy-ink)}
 .live-url a{color:var(--status-healthy-ink);text-decoration:underline}
+.upgrade{margin-top:12px;padding:14px 16px;border:1px solid var(--line, #d9d9d9);border-radius:var(--radius-md);display:flex;flex-direction:column;gap:8px}
+.upgrade[hidden]{display:none}
+.upgrade p{margin:0}
+.upgrade .btn{align-self:flex-start}
 .err{display:none;background:var(--status-stuck-soft);border:1px solid color-mix(in srgb,var(--status-stuck) 45%,transparent);border-radius:var(--radius-md);padding:14px 17px;font-size:14px;color:var(--status-stuck-ink)}
 footer.page{padding:36px 0 28px;color:var(--ink-3);font-size:12.5px;text-align:center;line-height:1.8}
 footer.page b{color:var(--ink-2)}
@@ -320,6 +324,11 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
           <button class="btn ghost" id="again" data-i18n="again">Build another</button>
         </div>
         <div class="live-url" id="live"><span data-i18n="live.label">Live:</span> <a id="live-a" target="_blank" rel="noopener"></a> <button class="btn ghost" id="copy" style="padding:7px 14px;font-size:13px" data-i18n="copy">Copy</button></div>
+        <div class="upgrade" id="upgrade" hidden>
+          <strong data-i18n="upgrade.title">Your site is live — free, for good.</strong>
+          <p id="upgrade-body"></p>
+          <a class="btn primary" id="upgrade-cta" target="_blank" rel="noopener"></a>
+        </div>
       </div>
       <aside class="side-col">
         <div class="arize-banner" id="arize"><span class="mini"><img alt="" src="https://api.dicebear.com/9.x/adventurer/svg?seed=Phoenix&radius=18&backgroundType=solid&scale=96"/></span><span data-i18n-html="arize.banner"><b>Phoenix</b> recorded this run to <b>Arize Phoenix</b> through its MCP server — every agent turn is traced.</span></div>
@@ -688,6 +697,44 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
     }
   }
 
+  // Card uLLFw04n: the paid moment. A free site stays live for good; the
+  // offer shows right after publish, where intent is highest. The CTA goes to
+  // the live plan on /pricing until the PayPal subscription slice lands.
+  // The price comes ONLY from /api/price (the products server's row, CTO ruling
+  // 5399696225): no literal price lives in web/. If it cannot be read, the
+  // offer stays hidden and no event fires.
+  // `begin_checkout` is deliberately NOT fired here: a click that only reaches
+  // a pricing page is not a checkout, and that event belongs to the PayPal slice.
+  const UPGRADE_URL = 'https://opsagents.agency/pricing?utm_source=rsb&utm_medium=post_publish#sku-rapid-site-builder';
+  function upgradeEvent(name, siteId, price) {
+    const p = { site_id: siteId, plan: 'rsb-monthly', value: price.amount, currency: price.currency };
+    try { if (window.rsbTrack) rsbTrack(name, p); } catch (_) {}
+    try { if (window.rsbPH) rsbPH(name, p); } catch (_) {}
+  }
+  function fmtMoney(amount, currency) {
+    const lang = document.documentElement.lang === 'he' ? 'he-IL' : 'en-US';
+    return new Intl.NumberFormat(lang, { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+  }
+  function fillPrice(key, price) {
+    return T(key, { price: fmtMoney(price.amount, price.currency), extra: fmtMoney(price.extra, price.currency) });
+  }
+  async function showUpgrade(siteId) {
+    const box = $('upgrade');
+    if (!box) return;
+    let price = null;
+    try {
+      const r = await fetch('/api/price', { cache: 'no-store' });
+      if (r.ok) price = await r.json();
+    } catch (_) { price = null; }
+    if (!price || !(price.amount > 0) || !(price.extra > 0) || !price.currency) return; // no price, no offer
+    $('upgrade-body').textContent = fillPrice('upgrade.body', price);
+    $('upgrade-cta').textContent = fillPrice('upgrade.cta', price);
+    $('upgrade-cta').href = UPGRADE_URL;
+    $('upgrade-cta').onclick = () => upgradeEvent('rsb_upgrade_click', siteId, price);
+    box.hidden = false;
+    upgradeEvent('rsb_upgrade_shown', siteId, price);
+  }
+
   async function publish() {
     if (!lastBuild) return;
     $('publish').disabled = true;
@@ -723,6 +770,7 @@ footer.page a{color:var(--brand-orange);text-decoration:none}
       $('live-a').textContent = j.url; $('live-a').href = j.url;
       $('live').style.display = 'flex';
       $('publish').style.display = 'none';
+      showUpgrade(j.id || '');
       sessionStorage.setItem('operate_state', JSON.stringify({
         business: lastBuild.spec.business,
         lang: lastBuild.spec.lang === 'he' ? 'he' : 'en',
