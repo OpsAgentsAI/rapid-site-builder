@@ -181,6 +181,8 @@ jobs:
     # deploy-staging.yml header: "this staging deploy is accepted on the pool ...
     # and prod's are REFUSED"). Matches this job's pre-existing placement.
     runs-on: [self-hosted, linux, x64, gcp]
+    # Card mwHId6GR: bound the pool job (see deploy-engine.yml).
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
