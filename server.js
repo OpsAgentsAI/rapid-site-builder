@@ -31,6 +31,7 @@ const analytics = require('./lib/analytics');
 const importSite = require('./lib/importSite');
 const posthog = require('./lib/posthog');
 const { PUBLIC_MEDIA_BASE_URL: MEDIA_BASE } = require('./lib/publicMedia');
+const buildInfo = require('./lib/buildInfo');
 
 const app = express();
 // Exactly one trusted hop (Cloud Run's front end, which appends the real
@@ -1017,6 +1018,12 @@ app.get('/api/health', (_req, res) => res.json({
   uploadsBucket: uploads.ENABLED,
   customDomains: domains.ENABLED,
   posthog: analytics.ENABLED,
+  // Which commit this deployment serves (card mIQXYnxd): the full SHA the
+  // staging rail stamped into BUILD_COMMIT, else null (never a guess), plus the
+  // Cloud Run revision. The refinement gate reads `commit` to prove
+  // staging_sha == merge_sha.
+  commit: buildInfo.BUILD_COMMIT,
+  revision: process.env.K_REVISION || null,
   categories: Object.keys(CATEGORIES)
 }));
 // Client runtime config (card WZtm0jA3): the GA4 Measurement ID this deployment
