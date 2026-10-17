@@ -164,3 +164,76 @@ test('the live-tree parser sees real jobs, not an empty set (fail-loud, not vacu
   assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm no longer sets node up before its first node call');
   assert.ok(row.guarded, 'the gap-B alarm is scored unguarded');
 });
+
+// ── One parser, not two (65pcQtze rework, ref3-rsb-1819 review at 35630042) ──
+//
+// This file's library used to carry its own copy of the workflow parser that
+// test/vendor/workflow-parse.js already exports (#92). The copy drifted: its
+// `jobs:` and job-head regexes rejected a TRAILING comment, so a head written as
+// `  ref-guard:  # note` dropped that job out of the audit and the guard stayed
+// green over it. The lib now consumes the vendor's functions; these pin that.
+
+const vendor = require('./vendor/workflow-parse.js');
+const lib = require('../lib/poolNodeRuntime');
+
+test('the lib re-uses the vendored parser — the very same functions, not a fork', () => {
+  assert.strictEqual(lib.jobsOf, vendor.jobsOf, 'lib/poolNodeRuntime.js has its own jobsOf again — a fork stops learning');
+  assert.strictEqual(lib.workflowFiles, vendor.workflowFiles, 'lib/poolNodeRuntime.js has its own workflowFiles again');
+  assert.strictEqual(lib.loadWorkflow, vendor.load, 'lib/poolNodeRuntime.js has its own loader again');
+});
+
+test('REGRESSION: a trailing comment on `jobs:` or on a job head does not hide the job from the audit', () => {
+  const commented = 'name: f\non:\n  workflow_dispatch:\njobs:  # every job below is audited\n' +
+    '  ref-guard:  # note\n    runs-on: [self-hosted, linux, x64, gcp]\n    steps:\n      - name: s\n        run: node scripts/x.js\n';
+  const rows = auditRepo(fixtureRepo({ 'a.yml': commented }));
+  assert.strictEqual(rows.length, 1, `the commented job head dropped out of the audit (rows: ${JSON.stringify(rows)})`);
+  assert.strictEqual(rows[0].job, 'ref-guard');
+  assert.strictEqual(rows[0].guarded, false, 'a commented pool job with no setup-node was scored guarded');
+  // CONTROL: the identical job without the comments reads the same — the comment is the only variable.
+  const plain = commented.replace('jobs:  # every job below is audited', 'jobs:').replace('ref-guard:  # note', 'ref-guard:');
+  assert.deepStrictEqual(auditRepo(fixtureRepo({ 'a.yml': plain })), rows, 'the control (no comments) disagrees with the commented fixture');
+});
+
+test('runsOnPool reads every runs-on form, and a comment never makes a job pool', () => {
+  const job = (runsOn) => ({ name: 'j', text: `  j:\n    runs-on:${runsOn}\n    steps:\n      - run: x\n` });
+  assert.strictEqual(runsOnPool(job(' [self-hosted, linux, x64, gcp]')), true, 'flow list');
+  assert.strictEqual(runsOnPool(job(' self-hosted')), true, 'plain scalar');
+  assert.strictEqual(runsOnPool(job(" 'self-hosted'  # pool")), true, 'quoted scalar with a trailing comment');
+  assert.strictEqual(runsOnPool(job('\n      - self-hosted\n      - linux')), true, 'block list');
+  assert.strictEqual(runsOnPool(job('\n      group: pool\n      labels: [self-hosted, gcp]')), true, 'runner-group object');
+  // CONTROLS
+  assert.strictEqual(runsOnPool(job(' ubuntu-latest')), false, 'hosted scalar');
+  assert.strictEqual(runsOnPool(job(' ubuntu-latest  # was self-hosted before #101')), false, 'a trailing comment made a hosted job pool');
+  assert.strictEqual(runsOnPool({ name: 'j', text: '  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo self-hosted\n' }), false,
+    'a step body mentioning self-hosted made a hosted job pool');
+});
+
+test('command position includes shell keywords, wrappers and backticks', () => {
+  const cases = {
+    'if.yml': 'if node -e "process.exit(0)"; then echo ok; fi',
+    'then.yml': 'if true; then node x.js; fi',
+    'exec.yml': 'exec node server.js',
+    'time.yml': 'time npm ci',
+    'xargs.yml': 'ls *.js | xargs node',
+    'bashc.yml': 'bash -c "node x.js"',
+    'backtick.yml': 'V=`node -p 1`',
+  };
+  for (const [file, cmd] of Object.entries(cases)) {
+    const root = fixtureRepo({ [file]: poolJob(`      - name: s\n        run: |\n          ${cmd}`) });
+    assert.strictEqual(auditRepo(root).length, 1, `${file}: "${cmd}" was not seen as a node invocation`);
+    assert.strictEqual(auditRepo(root)[0].guarded, false, `${file}: missing setup-node was not flagged`);
+  }
+  // CONTROLS: the keyword alone, or node as an argument, is not a call.
+  for (const cmd of ['if [ -d node_modules ]; then echo cached; fi', 'echo "time to install node"', 'bash -c "echo node"']) {
+    const root = fixtureRepo({ 'c.yml': poolJob(`      - name: s\n        run: |\n          ${cmd}`) });
+    assert.deepStrictEqual(auditRepo(root), [], `"${cmd}" was read as a node invocation`);
+  }
+});
+
+test('a setup-node mention INSIDE a run body is not a setup-node step', () => {
+  const root = fixtureRepo({ 'a.yml': poolJob(
+    `      - name: notes\n        run: |\n          echo "uses: actions/setup-node@v4 would fix this"\n\n      - name: measure\n        run: node scripts/x.js`) });
+  const [row] = auditRepo(root);
+  assert.strictEqual(row.setupNodeCount, 0, 'text inside a run body was counted as a setup-node step');
+  assert.strictEqual(row.guarded, false, 'a job whose only setup-node is an echo was scored guarded');
+});
