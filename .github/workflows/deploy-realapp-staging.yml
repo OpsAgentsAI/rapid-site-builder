@@ -88,22 +88,37 @@ jobs:
       # `git merge-base --is-ancestor` exit 128 -> cannot-verify -> refuse).
       # persist-credentials: false: no git token is left in .git/config, and
       # nothing after this step needs one.
+      #
+      # 🔒 TRUSTED TREE FIRST (security review, TOCTOU). This checks out the
+      # DISPATCHED ref — the same commit this workflow file came from — and
+      # NEVER the requested `sha`. The guard below runs node code from the
+      # working tree; if that tree were the requested SHA, a commit whose own
+      # lib/deployRefPolicy.js approves itself would pass its own guard. The
+      # requested SHA is only ever an ARGUMENT to git here, and is checked out
+      # for the build only after the guard has approved it.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      # ── REF GUARD — same decision and shape as deploy-realapp.yml ─────────
-      # The checked-out commit must be on the real-app line (a MERGED card, so
-      # an unmerged card/* tip is refused) and must NOT be merely main (main
-      # bytes reach APP-STAGING through deploy.yml already). The rule lives in
-      # lib/deployRefPolicy.js; this step only measures and hands over exit
-      # codes. No `if:` — dispatch is this workflow's only trigger.
+      # ── REF GUARD — same decision as deploy-realapp.yml, judged by THIS tree ─
+      # Two commits are judged, both by the dispatched tree's policy:
+      #   dispatched — the tree whose code is running this guard must itself be
+      #                on the real-app line (dispatching from an unmerged card/*
+      #                branch is refused);
+      #   target     — the commit to stage (input `sha`, else the dispatched
+      #                commit): on the real-app line, i.e. a MERGED card, and
+      #                not merely main (main bytes reach APP-STAGING through
+      #                deploy.yml already). A SHA git does not have exits 128 ->
+      #                cannot-verify -> refuse.
+      # The rule lives in lib/deployRefPolicy.js; this step only measures and
+      # hands over exit codes. No `if:` — dispatch is the only trigger.
       - name: Refuse a dispatch on any ref that is not on the real-app line
         id: refguard
         env:
           REF_NAME: ${{ github.ref_name }}
+          INPUT_SHA: ${{ inputs.sha }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp-staging.yml'].expectedRef")
           FORBIDDEN=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp-staging.yml'].mustNotBeAncestorOf.join(' ')")
@@ -112,29 +127,45 @@ jobs:
               || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
               || true
           done
-          rc=0
-          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
-          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
-          PROBES=""
-          for REF in $FORBIDDEN; do
-            frc=0
-            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
-            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
-            PROBES="$PROBES $REF=$frc"
+          DISPATCHED=$(git rev-parse HEAD)
+          TARGET="${INPUT_SHA:-$DISPATCHED}"
+          for WHICH in dispatched target; do
+            if [ "$WHICH" = dispatched ]; then C="$DISPATCHED"; else C="$TARGET"; fi
+            rc=0
+            git merge-base --is-ancestor "$C" "refs/remotes/origin/$EXPECTED" || rc=$?
+            echo "$WHICH $C: git merge-base --is-ancestor origin/$EXPECTED -> exit $rc"
+            PROBES=""
+            for REF in $FORBIDDEN; do
+              frc=0
+              git merge-base --is-ancestor "$C" "refs/remotes/origin/$REF" || frc=$?
+              echo "$WHICH $C: git merge-base --is-ancestor origin/$REF -> exit $frc"
+              PROBES="$PROBES $REF=$frc"
+            done
+            WHAT="$WHICH $C" RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+              const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+              const p = DEPLOY_REF_POLICY["deploy-realapp-staging.yml"];
+              const v = refDeployVerdict(process.env.RC, {
+                workflow: "deploy-realapp-staging.yml",
+                dispatchedRef: process.env.REF_NAME + " (" + process.env.WHAT + ")",
+                expectedRef: p.expectedRef,
+                tier: p.tier,
+                forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
+              });
+              console.log(v.message);
+              if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+            '
           done
-          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
-            const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
-            const p = DEPLOY_REF_POLICY["deploy-realapp-staging.yml"];
-            const v = refDeployVerdict(process.env.RC, {
-              workflow: "deploy-realapp-staging.yml",
-              dispatchedRef: process.env.REF_NAME,
-              expectedRef: p.expectedRef,
-              tier: p.tier,
-              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
-            });
-            console.log(v.message);
-            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
-          '
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+      # Only now does the requested commit's code enter the workspace, and only
+      # as BUILD input (Cloud Run source + Hosting files). Nothing below runs
+      # node or any repo script from it.
+      - name: Check out the approved commit for the build
+        env:
+          TARGET: ${{ steps.refguard.outputs.target }}
+        run: |
+          git checkout --quiet --detach "$TARGET"
+          test "$(git rev-parse HEAD)" = "$TARGET"
 
       # Written AFTER the guard, BEFORE the build: lib/buildInfo.js reads it and
       # /api/health reports it as `commit`. Never committed to the repo.

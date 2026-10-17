@@ -119,6 +119,12 @@ test('every action is pinned to a full commit SHA (a tag can move under a deploy
 
 test('checkout leaves no git credential behind, and the sha input is validated before use', () => {
   assert.match(SRC, /persist-credentials:\s*false/);
+  // TOCTOU: the checkout that the guard's node code runs from is the DISPATCHED
+  // commit, never the requested sha.
+  const co = /actions\/checkout@\S+\n\s+with:\n((?:\s{10}\S.*\n)+)/.exec(SRC);
+  assert.ok(co, 'checkout with: block not found');
+  assert.match(co[1], /ref:\s*\$\{\{\s*github\.sha\s*\}\}\s*$/m, 'checkout must be the dispatched commit');
+  assert.doesNotMatch(co[1], /inputs\./, 'the requested sha must never be the tree the guard runs from');
   assert.match(SRC, /INPUT_SHA:\s*\$\{\{\s*inputs\.sha\s*\}\}/);
   assert.match(SRC, /\^\[0-9a-f\]\{40\}\$/, 'the input must be checked as a full SHA');
   const validate = SRC.indexOf('Validate the requested SHA');
@@ -248,4 +254,126 @@ test('/api/health reports commit (null without a stamp) and the Cloud Run revisi
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+// ── 6. TOCTOU: a requested SHA cannot approve itself ────────────────────────
+//
+// Security review of the first head (83d0d33): the workflow checked out
+// `inputs.sha` and then ran the guard's node code FROM THAT TREE, so a commit
+// whose own lib/deployRefPolicy.js always allows would pass its own guard.
+// These tests execute the guard step's real shell, extracted from the
+// workflow, against a scratch repository.
+
+/** The `run: |` body of the step named `name`, dedented. */
+function stepRun(raw, name) {
+  const lines = raw.split('\n');
+  const at = lines.findIndex((l) => l.includes(`- name: ${name}`));
+  assert.ok(at > -1, `step ${name} not found`);
+  const r = lines.findIndex((l, i) => i > at && /^\s+run: \|\s*$/.test(l));
+  const body = [];
+  for (let i = r + 1; i < lines.length; i++) {
+    if (lines[i].trim() === '') { body.push(''); continue; }
+    if (!/^ {10}/.test(lines[i])) break;
+    body.push(lines[i].slice(10));
+  }
+  return body.join('\n');
+}
+
+const git = (cwd, ...args) => {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout.trim();
+};
+
+/** Scratch repo: main=base; real-app = base -> c1 -> c2; evil = c1 -> tampered policy. */
+function scratchRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stg-guard-'));
+  git(dir, 'init', '-q');
+  git(dir, 'config', 'user.email', 't@t'); git(dir, 'config', 'user.name', 't');
+  git(dir, 'config', 'commit.gpgsign', 'false');
+  fs.mkdirSync(path.join(dir, 'lib'));
+  fs.copyFileSync(path.join(REPO, 'lib', 'deployRefPolicy.js'), path.join(dir, 'lib', 'deployRefPolicy.js'));
+  git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'base');
+  const base = git(dir, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(dir, 'a.txt'), '1'); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'c1');
+  const c1 = git(dir, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(dir, 'b.txt'), '2'); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'c2');
+  const c2 = git(dir, 'rev-parse', 'HEAD');
+  git(dir, 'checkout', '-q', '--detach', c1);
+  const evilSrc = fs.readFileSync(path.join(dir, 'lib', 'deployRefPolicy.js'), 'utf8') +
+    "\nmodule.exports.refDeployVerdict = () => ({ allow: true, verdict: 'allow', message: 'TAMPERED: always allow' });\n";
+  fs.writeFileSync(path.join(dir, 'lib', 'deployRefPolicy.js'), evilSrc);
+  git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'evil: self-approving policy');
+  const evil = git(dir, 'rev-parse', 'HEAD');
+  git(dir, 'update-ref', 'refs/remotes/origin/main', base);
+  git(dir, 'update-ref', 'refs/remotes/origin/real-app', c2);
+  return { dir, base, c1, c2, evil };
+}
+
+function runGuard(repo, dispatched, inputSha) {
+  git(repo.dir, 'checkout', '-q', '--detach', dispatched);
+  const out = path.join(repo.dir, '.gh-output');
+  fs.writeFileSync(out, '');
+  const r = spawnSync('bash', ['-e', '-c', stepRun(RAW, 'Refuse a dispatch on any ref')], {
+    cwd: repo.dir, encoding: 'utf8',
+    env: { ...process.env, REF_NAME: 'real-app', INPUT_SHA: inputSha, GITHUB_OUTPUT: out },
+  });
+  return { status: r.status, log: r.stdout + r.stderr, output: fs.readFileSync(out, 'utf8') };
+}
+
+test('KNOWN-POSITIVE: the tampered policy really approves anything when it is the one loaded', (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const repo = scratchRepo();
+  try {
+    // The FIRST head's guard ran from the requested SHA's tree: that is HEAD=evil here.
+    const r = runGuard(repo, repo.evil, '');
+    assert.equal(r.status, 0, 'control: running the guard FROM the tampered tree passes — the hole the fix closes');
+    assert.match(r.log, /TAMPERED/);
+  } finally { fs.rmSync(repo.dir, { recursive: true, force: true }); }
+});
+
+test('TOCTOU: a requested SHA carrying a self-approving deployRefPolicy.js is REFUSED', (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const repo = scratchRepo();
+  try {
+    // Dispatched on the real-app tip (the trusted tree), asking to stage evil.
+    const r = runGuard(repo, repo.c2, repo.evil);
+    assert.notEqual(r.status, 0, `tampered SHA was approved:\n${r.log}`);
+    assert.doesNotMatch(r.log, /TAMPERED/, 'the requested SHA\'s policy code must never run');
+    assert.match(r.log, /REFUSED|CANNOT VERIFY/);
+    assert.equal(r.output, '', 'no target is handed to the build step on a refusal');
+  } finally { fs.rmSync(repo.dir, { recursive: true, force: true }); }
+});
+
+test('the guard approves a real-app commit, and refuses main, an unknown SHA and a card-branch dispatch', (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const repo = scratchRepo();
+  try {
+    const older = runGuard(repo, repo.c2, repo.c1);
+    assert.equal(older.status, 0, older.log);
+    assert.equal(older.output.trim(), `target=${repo.c1}`);
+    const tip = runGuard(repo, repo.c2, '');
+    assert.equal(tip.status, 0, tip.log);
+    assert.equal(tip.output.trim(), `target=${repo.c2}`);
+    assert.notEqual(runGuard(repo, repo.c2, repo.base).status, 0, 'main bytes must be refused');
+    assert.notEqual(runGuard(repo, repo.c2, 'f'.repeat(40)).status, 0, 'a SHA git does not have must be refused');
+    // Dispatched from a branch that is not on real-app (its own tree is the
+    // honest copy here): the dispatched-tree check refuses it.
+    git(repo.dir, 'checkout', '-q', '--detach', repo.c1);
+    fs.writeFileSync(path.join(repo.dir, 'c.txt'), '3'); git(repo.dir, 'add', 'c.txt'); git(repo.dir, 'commit', '-qm', 'card branch');
+    const card = git(repo.dir, 'rev-parse', 'HEAD');
+    assert.notEqual(runGuard(repo, card, repo.c1).status, 0, 'a dispatch from an unmerged branch must be refused');
+  } finally { fs.rmSync(repo.dir, { recursive: true, force: true }); }
+});
+
+test('the build checks out the APPROVED target only after the guard, and runs no repo code from it', () => {
+  const guard = SRC.indexOf('Refuse a dispatch on any ref');
+  const co = SRC.indexOf('Check out the approved commit for the build');
+  const stamp = SRC.indexOf('Stamp the commit this build serves');
+  assert.ok(guard > -1 && co > guard && stamp > co, 'order: guard -> checkout target -> stamp');
+  const step = SRC.slice(co, stamp);
+  assert.match(step, /TARGET:\s*\$\{\{\s*steps\.refguard\.outputs\.target\s*\}\}/);
+  assert.match(step, /git checkout --quiet --detach "\$TARGET"/);
+  const after = SRC.slice(co);
+  assert.doesNotMatch(after, /\bnode\s+(-e|-p|\S+\.m?js)|npm (run|test|ci)|require\(/, 'no repo code may run from the requested tree');
 });
