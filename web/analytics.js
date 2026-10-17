@@ -30,6 +30,22 @@
 (function () {
   'use strict';
 
+  // ── Host gate (card EGVHefy0) ────────────────────────────────────────
+  // The same bytes are served on builder.opsagents.agency (the product) AND
+  // on rapid-site-builder-app.web.app (the Hosting site behind it), plus the
+  // staging site, preview channels and localhost. Until this gate every host
+  // but localhost reported to GA4 property 549064186 as 'production', so
+  // web.app/test visits were counted as product traffic (9 of 23 users in
+  // Aug 2026). Analytics now runs ONLY on the production host; everywhere else
+  // both systems are complete no-ops: no config fetch, no script, no event.
+  var ANALYTICS_HOSTS = ['builder.opsagents.agency'];
+  var host = String((window.location && window.location.hostname) || '').toLowerCase().replace(/\.$/, '');
+  if (ANALYTICS_HOSTS.indexOf(host) === -1) {
+    window.rsbCapture = function () {};
+    window.rsbTrack = function () {};
+    return;
+  }
+
   // ── PostHog (u4xmePAo) ───────────────────────────────────────────────
   // Queue-then-flush: pages can call rsbCapture() before (or without) the
   // config round trip, and events are simply dropped if analytics never turns
@@ -98,7 +114,8 @@
         window.gtag('set', { send_page_view: false });
         core.initObservability({
           appName: 'rapid-site-builder',
-          environment: (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'development' : 'production',
+          // Only the production host gets this far (host gate above).
+          environment: 'production',
           ga4MeasurementId: id,
           adapter: web.createWebAdapter()
         });
