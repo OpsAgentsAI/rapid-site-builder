@@ -244,8 +244,10 @@ jobs:
 
       # 🔒 Layer 2 (header). BEFORE setup-gcloud, which logs gcloud in from
       # GOOGLE_GHA_CREDS_PATH. The file is self-contained (no relative paths),
-      # so it works from any location; auth's post-step cleanup tolerates the
-      # missing original, and the last step removes the moved copy.
+      # so it works from any location. auth's post-step cleanup is expected to
+      # tolerate the missing original (UNMEASURED until the first dispatch; a
+      # failure there is after the deploy and leaks nothing). The last step
+      # removes the moved copy.
       - name: Move the credentials file out of the upload root
         env:
           CREDS: ${{ steps.auth.outputs.credentials_file_path }}
