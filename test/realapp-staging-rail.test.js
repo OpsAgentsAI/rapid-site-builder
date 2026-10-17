@@ -285,7 +285,15 @@ const git = (cwd, ...args) => {
   return r.stdout.trim();
 };
 
-/** Scratch repo: main=base; real-app = base -> c1 -> c2; evil = c1 -> tampered policy. */
+/** The pre-#107 ignore file: gcloud's generated default, WITHOUT the credentials line. */
+const OLD_GCLOUDIGNORE = '.gcloudignore\n.git\n.gitignore\n#!include:.gitignore\n';
+
+/**
+ * Scratch repo: main=base; real-app = base -> old -> c1 -> c2; evil = c1 -> tampered policy.
+ * `old` is a merged real-app commit from before lib/buildInfo.js and before the
+ * gha-creds-*.json exclusion (29 of the 31 real commits the guard approves look
+ * like it). c1 and c2 carry this branch's real buildInfo, server wiring and ignore file.
+ */
 function scratchRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stg-guard-'));
   git(dir, 'init', '-q');
@@ -295,6 +303,13 @@ function scratchRepo() {
   fs.copyFileSync(path.join(REPO, 'lib', 'deployRefPolicy.js'), path.join(dir, 'lib', 'deployRefPolicy.js'));
   git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'base');
   const base = git(dir, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(dir, '.gcloudignore'), OLD_GCLOUDIGNORE);
+  fs.writeFileSync(path.join(dir, 'server.js'), "const x = require('./lib/other');\n");
+  fs.writeFileSync(path.join(dir, 'o.txt'), '0'); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'old (pre-#107, pre-buildInfo)');
+  const old = git(dir, 'rev-parse', 'HEAD');
+  fs.copyFileSync(path.join(REPO, 'lib', 'buildInfo.js'), path.join(dir, 'lib', 'buildInfo.js'));
+  fs.copyFileSync(path.join(REPO, '.gcloudignore'), path.join(dir, '.gcloudignore'));
+  fs.writeFileSync(path.join(dir, 'server.js'), "const buildInfo = require('./lib/buildInfo');\n");
   fs.writeFileSync(path.join(dir, 'a.txt'), '1'); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'c1');
   const c1 = git(dir, 'rev-parse', 'HEAD');
   fs.writeFileSync(path.join(dir, 'b.txt'), '2'); git(dir, 'add', '-A'); git(dir, 'commit', '-qm', 'c2');
@@ -307,8 +322,11 @@ function scratchRepo() {
   const evil = git(dir, 'rev-parse', 'HEAD');
   git(dir, 'update-ref', 'refs/remotes/origin/main', base);
   git(dir, 'update-ref', 'refs/remotes/origin/real-app', c2);
-  return { dir, base, c1, c2, evil };
+  return { dir, base, old, c1, c2, evil };
 }
+
+/** The `KEY=VALUE` lines a step wrote to $GITHUB_OUTPUT / $GITHUB_ENV, as an object. */
+const kv = (text) => Object.fromEntries(text.split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 
 function runGuard(repo, dispatched, inputSha) {
   git(repo.dir, 'checkout', '-q', '--detach', dispatched);
@@ -351,10 +369,10 @@ test('the guard approves a real-app commit, and refuses main, an unknown SHA and
   try {
     const older = runGuard(repo, repo.c2, repo.c1);
     assert.equal(older.status, 0, older.log);
-    assert.equal(older.output.trim(), `target=${repo.c1}`);
+    assert.deepEqual(kv(older.output), { target: repo.c1, dispatched: repo.c2 });
     const tip = runGuard(repo, repo.c2, '');
     assert.equal(tip.status, 0, tip.log);
-    assert.equal(tip.output.trim(), `target=${repo.c2}`);
+    assert.deepEqual(kv(tip.output), { target: repo.c2, dispatched: repo.c2 });
     assert.notEqual(runGuard(repo, repo.c2, repo.base).status, 0, 'main bytes must be refused');
     assert.notEqual(runGuard(repo, repo.c2, 'f'.repeat(40)).status, 0, 'a SHA git does not have must be refused');
     // Dispatched from a branch that is not on real-app (its own tree is the
@@ -376,4 +394,156 @@ test('the build checks out the APPROVED target only after the guard, and runs no
   assert.match(step, /git checkout --quiet --detach "\$TARGET"/);
   const after = SRC.slice(co);
   assert.doesNotMatch(after, /\bnode\s+(-e|-p|\S+\.m?js)|npm (run|test|ci)|require\(/, 'no repo code may run from the requested tree');
+});
+
+// ── 7. CREDENTIALS NEVER REACH THE UPLOAD (CTO review 5556503396) ───────────
+//
+// At 5d349e1, `git checkout --detach TARGET` brought in TARGET's .gcloudignore,
+// then auth wrote gha-creds-*.json into the workspace and `--source .` /
+// `builds submit .` uploaded it under TARGET's rules. 29 of the 31 commits the
+// guard approves predate the gha-creds-*.json exclusion (#107, c02f4ab). Three
+// layers now stand between the credentials file and the upload; each test
+// below executes that layer's real shell.
+
+const isAncIn = (cwd, a, b) => spawnSync('git', ['merge-base', '--is-ancestor', a, b], { cwd }).status;
+
+test('a target with no lib/buildInfo.js is REFUSED by the guard, before any credential exists', (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const repo = scratchRepo();
+  try {
+    // KNOWN-POSITIVE: `old` IS on the real-app line and not on main, so only the new check stops it.
+    assert.equal(isAncIn(repo.dir, repo.old, 'refs/remotes/origin/real-app'), 0);
+    assert.equal(isAncIn(repo.dir, repo.old, 'refs/remotes/origin/main'), 1);
+    const r = runGuard(repo, repo.c2, repo.old);
+    assert.notEqual(r.status, 0, `pre-buildInfo target was approved:\n${r.log}`);
+    assert.match(r.log, /REFUSED: target \S+ has no lib\/buildInfo\.js/);
+    assert.equal(r.output, '', 'no target is handed to the build step on a refusal');
+  } finally { fs.rmSync(repo.dir, { recursive: true, force: true }); }
+});
+
+function runStep(name, cwd, env) {
+  const r = spawnSync('bash', ['-e', '-c', stepRun(RAW, name)], { cwd, encoding: 'utf8', env: { ...process.env, ...env } });
+  return { status: r.status, log: r.stdout + r.stderr };
+}
+
+test('layer 1: the build uses the DISPATCHED tree\'s .gcloudignore, never the target\'s', (t) => {
+  if (spawnSync('git', ['--version']).status !== 0) return t.skip('git unavailable');
+  const repo = scratchRepo();
+  try {
+    const step = 'Check out the approved commit for the build';
+    // KNOWN-POSITIVE: the target's own ignore file really lacks the credentials line.
+    assert.doesNotMatch(git(repo.dir, 'show', `${repo.old}:.gcloudignore`), /^gha-creds-\*\.json$/m);
+    git(repo.dir, 'checkout', '-q', '--detach', repo.c2);
+    const r = runStep(step, repo.dir, { TARGET: repo.old, DISPATCHED: repo.c2 });
+    assert.equal(r.status, 0, r.log);
+    assert.equal(git(repo.dir, 'rev-parse', 'HEAD'), repo.old, 'the build tree is the target');
+    const used = fs.readFileSync(path.join(repo.dir, '.gcloudignore'), 'utf8');
+    assert.equal(used, fs.readFileSync(path.join(REPO, '.gcloudignore'), 'utf8'), 'the dispatched copy, byte for byte');
+    assert.match(used, /^gha-creds-\*\.json$/m);
+    // The credentials line comes AFTER the .gitignore include, so a target's
+    // .gitignore cannot negate it (gitignore: the last matching pattern wins).
+    assert.ok(used.indexOf('gha-creds-*.json') > used.indexOf('#!include:.gitignore'));
+    // A dispatched tree without the line stops the job.
+    git(repo.dir, 'checkout', '-q', '-f', '--detach', repo.c2);
+    const bad = runStep(step, repo.dir, { TARGET: repo.c1, DISPATCHED: repo.old });
+    assert.notEqual(bad.status, 0, 'a dispatched ignore file without gha-creds-*.json must stop the build');
+    assert.match(bad.log, /has no gha-creds-\*\.json line/);
+    // Missing outputs (guard skipped or refused) stop it too.
+    git(repo.dir, 'checkout', '-q', '-f', '--detach', repo.c2);
+    assert.notEqual(runStep(step, repo.dir, { TARGET: '', DISPATCHED: '' }).status, 0);
+  } finally { fs.rmSync(repo.dir, { recursive: true, force: true }); }
+});
+
+function credsSandbox() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stg-creds-'));
+  const ws = path.join(root, 'ws'); const tmp = path.join(root, 'tmp');
+  fs.mkdirSync(path.join(ws, '.git'), { recursive: true }); fs.mkdirSync(tmp);
+  const creds = path.join(ws, 'gha-creds-0123abcd.json');
+  fs.writeFileSync(creds, '{"type":"external_account"}');
+  const envFile = path.join(root, 'github_env'); fs.writeFileSync(envFile, '');
+  return { root, ws, tmp, creds, envFile, env: { GITHUB_WORKSPACE: ws, RUNNER_TEMP: tmp, GITHUB_ENV: envFile, CREDS: creds } };
+}
+
+test('layer 2: the credentials file is MOVED out of the workspace and gcloud is repointed at it', () => {
+  const sb = credsSandbox();
+  try {
+    const r = runStep('Move the credentials file out of the upload root', sb.ws, sb.env);
+    assert.equal(r.status, 0, r.log);
+    const dest = path.join(sb.tmp, 'gha-creds-0123abcd.json');
+    assert.ok(!fs.existsSync(sb.creds), 'the file must be gone from the workspace');
+    assert.equal(fs.readFileSync(dest, 'utf8'), '{"type":"external_account"}', 'same credentials, new place');
+    assert.equal(fs.statSync(dest).mode & 0o777, 0o600);
+    const env = kv(fs.readFileSync(sb.envFile, 'utf8'));
+    for (const k of ['GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_GHA_CREDS_PATH', 'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE', 'STG_CREDS_FILE']) {
+      assert.equal(env[k], dest, `${k} must point at the moved file`);
+    }
+  } finally { fs.rmSync(sb.root, { recursive: true, force: true }); }
+});
+
+test('layer 2 fails closed: a second credentials file left in the workspace, or no file at all, stops the job', () => {
+  const sb = credsSandbox();
+  try {
+    fs.mkdirSync(path.join(sb.ws, 'web'));
+    fs.writeFileSync(path.join(sb.ws, 'web', 'gha-creds-stray.json'), '{}');
+    const r = runStep('Move the credentials file out of the upload root', sb.ws, sb.env);
+    assert.notEqual(r.status, 0, 'a stray gha-creds file under the upload root must stop the job');
+    assert.match(r.log, /still inside the workspace/);
+    const none = runStep('Move the credentials file out of the upload root', sb.ws, { ...sb.env, CREDS: '' });
+    assert.notEqual(none.status, 0, 'no credentials_file_path output must stop the job');
+  } finally { fs.rmSync(sb.root, { recursive: true, force: true }); }
+});
+
+/** Runs the upload-set check with a stub `gcloud` whose `meta list-files-for-upload` prints `files`. */
+function uploadCheck(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stg-upload-'));
+  const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
+  const list = path.join(root, 'list.txt'); fs.writeFileSync(list, files.join('\n') + '\n');
+  fs.writeFileSync(path.join(bin, 'gcloud'),
+    `#!/bin/bash\n[ "$1 $2" = "meta list-files-for-upload" ] || { echo "unexpected gcloud $*" >&2; exit 2; }\ncat ${JSON.stringify(list)}\n`, { mode: 0o755 });
+  try {
+    return runStep('Refuse an upload set that carries credentials', root, { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: root });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
+test('layer 3: gcloud\'s own upload dry run must list no gha-creds file and must list BUILD_COMMIT', () => {
+  const clean = ['BUILD_COMMIT', 'server.js', 'lib/buildInfo.js', 'web/index.html', 'Dockerfile'];
+  const ok = uploadCheck(clean);
+  assert.equal(ok.status, 0, ok.log);
+  const leak = uploadCheck([...clean, 'gha-creds-0123abcd.json']);
+  assert.notEqual(leak.status, 0, 'a gha-creds file in the upload set must stop the job');
+  assert.match(leak.log, /lists a gha-creds file/);
+  assert.notEqual(uploadCheck([...clean, 'web/gha-creds-x.json']).status, 0, 'in any directory');
+  const noStamp = uploadCheck(clean.slice(1));
+  assert.notEqual(noStamp.status, 0, 'an upload without BUILD_COMMIT cannot prove the staged commit');
+  assert.match(noStamp.log, /BUILD_COMMIT is not in the upload set/);
+});
+
+test('the layers run in order: auth -> move -> setup-gcloud -> upload check -> deploy; hosting re-checks before submit', () => {
+  const at = (re) => SRC.search(re);
+  const auth = at(/id: auth\n\s+uses: google-github-actions\/auth@/);
+  const move = at(/- name: Move the credentials file out of the upload root/);
+  const setup = at(/google-github-actions\/setup-gcloud@/);
+  const check = at(/- name: Refuse an upload set that carries credentials/);
+  const deploy = at(/gcloud run deploy "\$STG_SERVICE"/);
+  const submit = at(/gcloud builds submit \./);
+  assert.ok(auth > -1 && move > auth && setup > move && check > setup && deploy > check && submit > deploy,
+    `order: ${JSON.stringify({ auth, move, setup, check, deploy, submit })}`);
+  assert.match(SRC.slice(move, setup), /CREDS:\s*\$\{\{\s*steps\.auth\.outputs\.credentials_file_path\s*\}\}/);
+  const hosting = SRC.slice(SRC.lastIndexOf('- name: ', submit), submit);
+  assert.match(hosting, /set -euo pipefail/, 'a failing gcloud must not read as an empty, clean upload set');
+  assert.match(hosting, /gcloud meta list-files-for-upload \. >/);
+  assert.match(hosting, /gha-creds-/);
+  assert.match(SRC, /- name: Remove the moved credentials file\n\s+if: always\(\)/);
+});
+
+test('the Hosting smoke also demands the agent engine (parity with deploy.yml APP-STAGING)', () => {
+  const smoke = SRC.split('- name: ').find((s) => /^Smoke test Hosting/.test(s));
+  assert.ok(smoke, 'hosting smoke step not found');
+  assert.match(smoke, /'"agentEngine":true'/);
+});
+
+test('env keys also equal MAIN\'s deploy.yml APP-STAGING job (the copy that actually writes APP-STAGING)', (t) => {
+  const r = spawnSync('git', ['show', 'refs/remotes/origin/main:.github/workflows/deploy.yml'], { cwd: REPO, encoding: 'utf8' });
+  if (r.status !== 0) return t.skip('origin/main not fetched (shallow CI checkout); the working-tree copy is pinned above');
+  assert.deepEqual(envKeys(SRC), envKeys(code(jobBlock(r.stdout, 'deploy-app-staging'))));
 });

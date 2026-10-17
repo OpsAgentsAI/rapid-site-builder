@@ -35,6 +35,35 @@ name: Stage Real App (APP-STAGING, dispatch-only)
 # with main bytes; its build writes no BUILD_COMMIT, so /api/health then reports
 # `commit: null` — never a stale real-app SHA. Both files use concurrency group
 # `deploy` so the two rails never deploy APP-STAGING at the same time.
+# ⚠️ ONE PENDING RUN PER GROUP. GitHub keeps at most one PENDING run in a
+# concurrency group: while a `deploy` run is in progress, a newer queued run
+# REPLACES (cancels) an older queued one, whichever file it came from. So a
+# staging dispatch queued behind a running deploy.yml can be cancelled by a
+# push:main run queued after it (and the reverse). Before dispatching, check
+# that no deploy.yml / deploy-realapp-staging.yml run is in progress or queued
+# (`gh run list --workflow deploy.yml --status in_progress` and `--status queued`);
+# a cancelled staging run staged nothing — re-dispatch it.
+#
+# 🔒 CREDENTIALS NEVER REACH THE UPLOAD (CTO review 5556503396, card osLDRRqj).
+# google-github-actions/auth writes the WIF external_account file
+# gha-creds-<hash>.json into $GITHUB_WORKSPACE, and `gcloud run deploy --source .`
+# / `gcloud builds submit .` upload the workspace. The requested `sha` may be
+# any real-app commit, and 29 of them predate the .gcloudignore exclusion
+# (#107, c02f4ab). Three independent layers, none of which reads TARGET's rules:
+#   1. the build uses the DISPATCHED tree's .gcloudignore, not TARGET's, and the
+#      job refuses to go on if that file lacks the gha-creds-*.json line;
+#   2. right after auth, the credentials file is MOVED to $RUNNER_TEMP (outside
+#      the upload root) and the three env vars that point at it are repointed;
+#   3. before each upload, `gcloud meta list-files-for-upload .` (gcloud's own
+#      dry run of the upload set) must list no gha-creds-* file and must list
+#      BUILD_COMMIT; otherwise the job stops before anything is uploaded.
+# test/realapp-staging-rail.test.js executes each layer's shell.
+#
+# ⚠️ SHARED IDENTITY (security review, MEDIUM, pre-existing): this rail uses the
+# same WIF provider, deployer SA and project (opsagent-staging) as PROD
+# deploy-realapp.yml and deploy.yml's APP-STAGING job, with no `environment:`
+# protection. A staging-only SA bound by a WIF attribute condition is IAM work
+# behind a credentials gate: card K0ACE2VV. This file changes no IAM.
 
 on:
   workflow_dispatch:
@@ -155,17 +184,47 @@ jobs:
               if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
             '
           done
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          # The target must be able to REPORT the commit it serves. A real-app
+          # commit from before lib/buildInfo.js (card mIQXYnxd) would deploy,
+          # move traffic and only then fail the commit smoke. Refuse it here,
+          # before any credential exists. git reads only — no target code runs.
+          if ! git cat-file -e "$TARGET:lib/buildInfo.js" 2>/dev/null \
+            || ! git show "$TARGET:server.js" 2>/dev/null | grep -qF "require('./lib/buildInfo')"; then
+            echo "::error::REFUSED: target $TARGET has no lib/buildInfo.js wired into server.js, so /api/health could not report the staged commit. Stage a real-app commit that carries it."
+            exit 1
+          fi
+          echo "target $TARGET: lib/buildInfo.js present and wired -> can report its commit"
+          {
+            echo "target=$TARGET"
+            echo "dispatched=$DISPATCHED"
+          } >> "$GITHUB_OUTPUT"
 
       # Only now does the requested commit's code enter the workspace, and only
-      # as BUILD input (Cloud Run source + Hosting files). Nothing below runs
-      # node or any repo script from it.
+      # as BUILD input. Nothing below runs node or any repo script ON THE RUNNER.
+      # TARGET's code DOES run in Cloud Build: its Dockerfile (`npm ci`, with
+      # lifecycle scripts) in the Cloud Run source build, and its
+      # cloudbuild-staging-hosting.yaml under gha-deployer@opsagent-staging.
+      # That is why the guard above only approves MERGED real-app commits.
+      #
+      # 🔒 Layer 1 (header): TARGET's .gcloudignore is replaced by the
+      # DISPATCHED tree's, which carries gha-creds-*.json. For a pre-#107
+      # TARGET that has no .gcloudignore at all, gcloud's generated default is
+      # the same four lines minus the credentials line, so nothing else changes.
       - name: Check out the approved commit for the build
         env:
           TARGET: ${{ steps.refguard.outputs.target }}
+          DISPATCHED: ${{ steps.refguard.outputs.dispatched }}
         run: |
+          set -euo pipefail
+          test -n "$TARGET" && test -n "$DISPATCHED"
           git checkout --quiet --detach "$TARGET"
           test "$(git rev-parse HEAD)" = "$TARGET"
+          git show "$DISPATCHED:.gcloudignore" > .gcloudignore
+          if ! grep -qxF 'gha-creds-*.json' .gcloudignore; then
+            echo "::error::the dispatched tree's .gcloudignore has no gha-creds-*.json line; refusing to build an upload that could carry credentials"
+            exit 1
+          fi
+          echo "upload rules: .gcloudignore from dispatched $DISPATCHED (not from target $TARGET)"
 
       # Written AFTER the guard, BEFORE the build: lib/buildInfo.js reads it and
       # /api/health reports it as `commit`. Never committed to the repo.
@@ -176,12 +235,59 @@ jobs:
           echo "sha=$(cat BUILD_COMMIT)" >> "$GITHUB_OUTPUT"
           echo "staging commit: $(cat BUILD_COMMIT)"
 
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+      - id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      # 🔒 Layer 2 (header). BEFORE setup-gcloud, which logs gcloud in from
+      # GOOGLE_GHA_CREDS_PATH. The file is self-contained (no relative paths),
+      # so it works from any location; auth's post-step cleanup tolerates the
+      # missing original, and the last step removes the moved copy.
+      - name: Move the credentials file out of the upload root
+        env:
+          CREDS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          set -euo pipefail
+          test -n "$CREDS" && test -f "$CREDS"
+          DEST="$RUNNER_TEMP/$(basename "$CREDS")"
+          case "$CREDS" in
+            "$GITHUB_WORKSPACE"/*) mv "$CREDS" "$DEST" ;;
+            *) cp "$CREDS" "$DEST" ;;
+          esac
+          chmod 600 "$DEST"
+          {
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$DEST"
+            echo "GOOGLE_GHA_CREDS_PATH=$DEST"
+            echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$DEST"
+            echo "STG_CREDS_FILE=$DEST"
+          } >> "$GITHUB_ENV"
+          LEFT=$(find "$GITHUB_WORKSPACE" -path "$GITHUB_WORKSPACE/.git" -prune -o -name 'gha-creds-*' -print)
+          if [ -n "$LEFT" ]; then
+            echo "::error::credentials file(s) still inside the workspace: $LEFT"
+            exit 1
+          fi
+          echo "credentials moved to \$RUNNER_TEMP; none left under the upload root"
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
+
+      # 🔒 Layer 3 (header): gcloud's own dry run of what `--source .` and
+      # `builds submit .` would upload, under the rules now in the workspace.
+      - name: Refuse an upload set that carries credentials
+        run: |
+          set -euo pipefail
+          gcloud meta list-files-for-upload . > "$RUNNER_TEMP/upload-set.txt"
+          if grep -E '(^|/)gha-creds-[^/]*$' "$RUNNER_TEMP/upload-set.txt"; then
+            echo "::error::the upload set lists a gha-creds file; nothing was uploaded"
+            exit 1
+          fi
+          if ! grep -qxE '(\./)?BUILD_COMMIT' "$RUNNER_TEMP/upload-set.txt"; then
+            echo "::error::BUILD_COMMIT is not in the upload set; /api/health could not report the staged commit"
+            exit 1
+          fi
+          echo "upload set: $(wc -l < "$RUNNER_TEMP/upload-set.txt") files, no gha-creds, BUILD_COMMIT present"
 
       - name: Deploy Cloud Run — APP-STAGING (auth ON)
         run: |
@@ -218,8 +324,14 @@ jobs:
 
       - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
         run: |
+          set -euo pipefail
           URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
+          gcloud meta list-files-for-upload . > "$RUNNER_TEMP/upload-set-hosting.txt"
+          if grep -E '(^|/)gha-creds-[^/]*$' "$RUNNER_TEMP/upload-set-hosting.txt"; then
+            echo "::error::the upload set lists a gha-creds file; refusing gcloud builds submit"
+            exit 1
+          fi
           gcloud builds submit . \
             --project "$PROJECT_ID" \
             --config=cloudbuild-staging-hosting.yaml \
@@ -232,6 +344,9 @@ jobs:
           set -euo pipefail
           sleep 5
           curl -sf "$STG_APP_URL/api/health" | tee "$RUNNER_TEMP/health-stg-hosting.json"
+          # This proves the Hosting rewrite reaches the staged REVISION; it does
+          # not prove the static bundle came from TARGET (CTO review note 4).
+          grep -q '"agentEngine":true' "$RUNNER_TEMP/health-stg-hosting.json"
           grep -q '"auth":true' "$RUNNER_TEMP/health-stg-hosting.json"
           grep -q "\"commit\":\"$SHA\"" "$RUNNER_TEMP/health-stg-hosting.json" \
             || { echo "::error::$STG_APP_URL did not report commit $SHA"; exit 1; }
@@ -240,6 +355,11 @@ jobs:
             echo "::error::$STG_APP_URL/ answered $code, expected 200 serving the real app."
             exit 1
           fi
+
+      - name: Remove the moved credentials file
+        if: always()
+        run: |
+          if [ -n "${STG_CREDS_FILE:-}" ]; then rm -f "$STG_CREDS_FILE"; fi
 
       # ── PROVENANCE — reads the guard's ACTUAL outcome (cards 22I0yUum / QpERt8db)
       # always(): a refused or failed run still leaves a record, and on a refusal
