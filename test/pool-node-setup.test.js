@@ -15,10 +15,12 @@
  * is a red nobody re-reads.
  *
  * ⚠️ THE ALLOWLIST BELOW IS DEBT, NOT AN EXEMPTION, AND IT CAN ONLY SHRINK.
- * Four pool jobs still run node with no setup-node. All four live in DEPLOY
+ * Two pool jobs still run node with no setup-node. Both live in DEPLOY
  * workflows, which this lane may not edit (Tier C — Michal presses deploy-workflow
  * changes), so they are pinned here with their evidence rather than silently
- * tolerated. Three separate assertions keep the pin honest: a NEW unguarded job
+ * tolerated. (It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
+ * and deploy.yml:ref-guard to ubuntu-latest, whose image ships node, so the
+ * shrink assertion below made us delete them — the allowlist working as designed.) Three separate assertions keep the pin honest: a NEW unguarded job
  * fails, an allowlisted job that got FIXED fails (remove the entry), and an
  * allowlisted job that no longer EXISTS fails. An allowlist that cannot rot is
  * the only kind worth having.
@@ -42,12 +44,8 @@ const REPO_ROOT = path.join(__dirname, '..');
 const KNOWN_UNGUARDED = {
   'deploy-engine.yml:deploy-engine':
     'deploy workflow (Tier C). Dispatch-only, and its ref-guard step carries no `if:` — so the node call runs on EVERY dispatch.',
-  'deploy-realapp.yml:deploy':
-    'deploy workflow (Tier C). Dispatch-only and the ONLY route to PROD; its ref guard shells out to node before anything deploys.',
-  'deploy.yml:ref-guard':
-    'deploy workflow (Tier C). The node step is `if: workflow_dispatch`, so it is SKIPPED on every push-to-main run — which is why this has never reddened.',
   'preview.yml:ref-guard':
-    'deploy workflow (Tier C). Same dispatch-only shape as deploy.yml:ref-guard.',
+    'deploy workflow (Tier C). Dispatch-only; its ref-guard step shells out to node with no setup-node before it.',
 };
 
 /** Write a throwaway repo skeleton holding exactly these workflow files. */
