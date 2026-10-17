@@ -179,10 +179,10 @@ jobs:
           set -euo pipefail
           URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
-          curl -sf "$URL/api/health" | tee /tmp/health-stg.json
-          grep -q '"agentEngine":true' /tmp/health-stg.json
-          grep -q '"auth":true' /tmp/health-stg.json
-          grep -q "\"commit\":\"$SHA\"" /tmp/health-stg.json \
+          curl -sf "$URL/api/health" | tee "$RUNNER_TEMP/health-stg.json"
+          grep -q '"agentEngine":true' "$RUNNER_TEMP/health-stg.json"
+          grep -q '"auth":true' "$RUNNER_TEMP/health-stg.json"
+          grep -q "\"commit\":\"$SHA\"" "$RUNNER_TEMP/health-stg.json" \
             || { echo "::error::Cloud Run did not report commit $SHA"; exit 1; }
 
       - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
@@ -200,9 +200,9 @@ jobs:
         run: |
           set -euo pipefail
           sleep 5
-          curl -sf "$STG_APP_URL/api/health" | tee /tmp/health-stg-hosting.json
-          grep -q '"auth":true' /tmp/health-stg-hosting.json
-          grep -q "\"commit\":\"$SHA\"" /tmp/health-stg-hosting.json \
+          curl -sf "$STG_APP_URL/api/health" | tee "$RUNNER_TEMP/health-stg-hosting.json"
+          grep -q '"auth":true' "$RUNNER_TEMP/health-stg-hosting.json"
+          grep -q "\"commit\":\"$SHA\"" "$RUNNER_TEMP/health-stg-hosting.json" \
             || { echo "::error::$STG_APP_URL did not report commit $SHA"; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$STG_APP_URL/")
           if [ "$code" != "200" ]; then
