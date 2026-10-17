@@ -74,7 +74,17 @@ const DEPLOY_VERBS =
  * REDS until this table is updated — so closing the gap cannot be done
  * quietly, and neither can widening it.
  */
-const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp.yml', 'deploy.yml', 'preview.yml']);
+const GUARDED = new Set(['deploy-engine.yml', 'deploy-realapp-staging.yml', 'deploy-realapp.yml', 'deploy.yml', 'preview.yml']);
+
+/**
+ * Where a step that USES an action sits, whether the action is referenced by a
+ * moving tag (`@v4`) or pinned to a commit SHA (`@<40 hex> # v4.4.0`, card
+ * mIQXYnxd's staging rail). Matching on the `@v4` spelling alone would make
+ * every position below -1 for a pinned file, and -1 sorts before everything.
+ */
+const AUTH_USE = /google-github-actions\/auth@(v2\b|[0-9a-f]{40})/;
+const CHECKOUT_USE = /actions\/checkout@(v4\b|[0-9a-f]{40})/;
+const at = (s, re) => s.search(re);
 
 /**
  * ⚠️ EMPTY AS OF THE 2026-09-15 RECONCILE (card XUCfQGz6, issue #70) — and the
@@ -305,7 +315,7 @@ test('each policy row is actually CALLED by its workflow, with its own ref', () 
       // probe on PR #67, not reasoned about: an assertion of merely "the module
       // is required" is satisfied by the require line alone, so a hardcoded ref
       // beside it stayed fully green.
-      const guardBlock = s.slice(s.indexOf('Refuse a dispatch on any ref'), s.indexOf('google-github-actions/auth@v2'));
+      const guardBlock = s.slice(s.indexOf('Refuse a dispatch on any ref'), at(s, AUTH_USE));
       assert.ok(guardBlock.length > 0, `${file}: guard block not found before auth`);
       assert.doesNotMatch(
         guardBlock.replace(/DEPLOY_REF_POLICY\[[^\]]*\]/g, ''),
@@ -316,11 +326,11 @@ test('each policy row is actually CALLED by its workflow, with its own ref', () 
   }
 });
 
-test('the guard runs BEFORE auth and BEFORE any deploy, in both new workflows', () => {
-  for (const file of ['deploy.yml', 'deploy-engine.yml']) {
+test('the guard runs BEFORE auth and BEFORE any deploy, in every non-PROD dispatch workflow', () => {
+  for (const file of ['deploy.yml', 'deploy-engine.yml', 'deploy-realapp-staging.yml']) {
     const s = readWf(file);
     const guard = s.indexOf('Refuse a dispatch on any ref');
-    const auth = s.indexOf('google-github-actions/auth@v2');
+    const auth = at(s, AUTH_USE);
     // indexOf returns -1 when absent, and -1 is less than any real position, so
     // "guard before deploy" would be satisfied by there being NO deploy at all.
     // Presence is asserted first, deliberately.
@@ -336,7 +346,7 @@ test('the guard runs BEFORE auth and BEFORE any deploy, in both new workflows', 
 test('checkout uses fetch-depth: 0 in every guard job — without it the guard can never answer', () => {
   for (const file of Object.keys(DEPLOY_REF_POLICY)) {
     const s = readWf(file);
-    const checkout = s.indexOf('actions/checkout@v4');
+    const checkout = at(s, CHECKOUT_USE);
     const guard = Math.max(s.indexOf('Refuse a dispatch on any ref'), s.indexOf('Refuse any ref that is not'));
     assert.ok(checkout > -1 && guard > checkout, `${file}: checkout must precede the guard`);
     assert.match(s.slice(checkout, guard), /fetch-depth:\s*0/, `${file}: guard checkout is shallow`);
@@ -350,9 +360,9 @@ test('the exit code is captured with `|| rc=$?`, never left to `bash -e`', () =>
 });
 
 test('the dispatched ref reaches the shell through env:, not inline interpolation', () => {
-  for (const file of ['deploy.yml', 'deploy-engine.yml']) {
+  for (const file of ['deploy.yml', 'deploy-engine.yml', 'deploy-realapp-staging.yml']) {
     const s = readWf(file);
-    const block = s.slice(s.indexOf('Refuse a dispatch on any ref'), s.indexOf('google-github-actions/auth@v2'));
+    const block = s.slice(s.indexOf('Refuse a dispatch on any ref'), at(s, AUTH_USE));
     assert.match(block, /REF_NAME:\s*\$\{\{\s*github\.ref_name\s*\}\}/, file);
     assert.match(block, /process\.env\.REF_NAME/, file);
     const runBody = block.slice(block.indexOf('run: |'));
@@ -429,11 +439,11 @@ test('the guard is the FIRST thing the deploying job does after checkout', () =>
   // checkout itself" is the equivalent of main's `needs: ref-guard`.
   for (const file of GUARDED) {
     const s = readWf(file);
-    const checkout = s.indexOf('actions/checkout@v4');
+    const checkout = at(s, CHECKOUT_USE);
     const guard = s.indexOf('Refuse a dispatch on any ref');
     assert.ok(checkout > -1 && guard > checkout, `${file}: checkout must precede the guard`);
     const between = s.slice(checkout, guard);
-    assert.doesNotMatch(between, /- (uses|name):[^\n]*(auth@v2|setup-gcloud|setup-python|run deploy)/,
+    assert.doesNotMatch(between, /- (uses|name):[^\n]*(auth@|setup-gcloud|setup-python|run deploy)/,
       `${file}: nothing may run between checkout and the guard`);
   }
 });

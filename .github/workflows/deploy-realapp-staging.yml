@@ -1,0 +1,240 @@
+name: Stage Real App (APP-STAGING, dispatch-only)
+
+# ── WHAT THIS IS (card mIQXYnxd) ─────────────────────────────────────────────
+# The staging rail for the `real-app` line. Before it, no CI/CD path could
+# stage a real-app commit: deploy.yml puts MAIN bytes on APP-STAGING (push:main),
+# preview.yml only takes the main line and proxies to the retired surface, and
+# deploy-realapp.yml is PROD. So every real-app card reached the refinement
+# gate's staging leg with nothing to run.
+#
+# | tier        | Cloud Run              | Hosting site            | who deploys it                          |
+# |-------------|------------------------|-------------------------|-----------------------------------------|
+# | APP-STAGING | rapid-builder-app-stg  | rapid-builder-stg       | deploy.yml (main, push) + THIS FILE      |
+# |             |                        |                         | (real-app, workflow_dispatch only)      |
+# | PROD        | (see deploy-realapp.yml — never named or touched here)                                 |
+#
+# 🚫 NEVER PROD. This file deploys ONLY the existing APP-STAGING service and
+# site, with the same flags deploy.yml's deploy-app-staging job uses
+# (--min-instances 0, PUBLIC_BASE_URL/ALLOWED_ORIGINS on rapid-builder-stg,
+# cloudbuild-staging-hosting.yaml scoped to rapid-builder-stg). It creates no
+# GCP resource, secret or IAM binding: same WIF provider, same deployer and
+# runtime service accounts, same Secret Manager secret as that job.
+# test/realapp-staging-rail.test.js fails if any PROD name appears in this file.
+#
+# DISPATCH IT ON `real-app`. workflow_dispatch runs this file FROM the
+# dispatched ref, so only real-app's copy exists to run. Optional input `sha`
+# stages an older commit of the real-app line (the merge commit of a card, when
+# real-app has moved on since); blank = the tip of the dispatched ref.
+#
+# WHAT IT PROVES. After the deploy, both the Cloud Run URL and the Hosting URL
+# must answer /api/health with `"commit":"<the staged SHA>"` (lib/buildInfo.js
+# reads the BUILD_COMMIT file this job writes before the build). That is the
+# `staging_sha == merge_sha` record the refinement gate's staging leg needs.
+#
+# ⚠️ APP-STAGING IS SHARED with deploy.yml. A later push to main redeploys it
+# with main bytes; its build writes no BUILD_COMMIT, so /api/health then reports
+# `commit: null` — never a stale real-app SHA. Both files use concurrency group
+# `deploy` so the two rails never deploy APP-STAGING at the same time.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Full 40-character commit SHA on the real-app line to stage (blank = tip of the dispatched ref)'
+        required: false
+        default: ''
+        type: string
+
+# Least privilege: nothing at workflow level; the one job asks for exactly
+# what it uses (read the repo, mint the OIDC token WIF exchanges).
+permissions: {}
+
+concurrency:
+  # SAME group as deploy.yml — both write APP-STAGING (see header).
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  STG_SERVICE: rapid-builder-app-stg
+  STG_HOSTING_SITE: rapid-builder-stg
+  STG_APP_URL: https://rapid-builder-stg.web.app
+
+jobs:
+  stage:
+    name: Stage a real-app commit on APP-STAGING
+    # Card 8itdTRtX: GitHub-hosted, like every deploy job in this repo.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The input reaches the shell through env:, never inline `${{ }}`, and
+      # must be a full lowercase SHA before anything uses it: a branch or tag
+      # name here would make "the commit we staged" ambiguous.
+      - name: Validate the requested SHA
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          if [ -n "$INPUT_SHA" ] && ! printf '%s' "$INPUT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::input sha must be a full 40-character lowercase commit SHA (or blank)"
+            exit 1
+          fi
+
+      # Pinned to commit SHAs (tags move). checkout MUST precede auth:
+      # checkout(clean:true) would wipe the gha-creds-*.json that auth writes.
+      # fetch-depth: 0 is load-bearing for the guard (a shallow clone makes
+      # `git merge-base --is-ancestor` exit 128 -> cannot-verify -> refuse).
+      # persist-credentials: false: no git token is left in .git/config, and
+      # nothing after this step needs one.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # ── REF GUARD — same decision and shape as deploy-realapp.yml ─────────
+      # The checked-out commit must be on the real-app line (a MERGED card, so
+      # an unmerged card/* tip is refused) and must NOT be merely main (main
+      # bytes reach APP-STAGING through deploy.yml already). The rule lives in
+      # lib/deployRefPolicy.js; this step only measures and hands over exit
+      # codes. No `if:` — dispatch is this workflow's only trigger.
+      - name: Refuse a dispatch on any ref that is not on the real-app line
+        id: refguard
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp-staging.yml'].expectedRef")
+          FORBIDDEN=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp-staging.yml'].mustNotBeAncestorOf.join(' ')")
+          for REF in $EXPECTED $FORBIDDEN; do
+            git rev-parse --verify --quiet "refs/remotes/origin/$REF" >/dev/null 2>&1 \
+              || git fetch --no-tags --quiet origin "+refs/heads/$REF:refs/remotes/origin/$REF" \
+              || true
+          done
+          rc=0
+          git merge-base --is-ancestor HEAD "refs/remotes/origin/$EXPECTED" || rc=$?
+          echo "git merge-base --is-ancestor HEAD origin/$EXPECTED -> exit $rc"
+          PROBES=""
+          for REF in $FORBIDDEN; do
+            frc=0
+            git merge-base --is-ancestor HEAD "refs/remotes/origin/$REF" || frc=$?
+            echo "git merge-base --is-ancestor HEAD origin/$REF -> exit $frc"
+            PROBES="$PROBES $REF=$frc"
+          done
+          RC="$rc" RC_FORBIDDEN="$PROBES" node -e '
+            const { refDeployVerdict, parseForbiddenProbes, DEPLOY_REF_POLICY } = require("./lib/deployRefPolicy");
+            const p = DEPLOY_REF_POLICY["deploy-realapp-staging.yml"];
+            const v = refDeployVerdict(process.env.RC, {
+              workflow: "deploy-realapp-staging.yml",
+              dispatchedRef: process.env.REF_NAME,
+              expectedRef: p.expectedRef,
+              tier: p.tier,
+              forbidden: parseForbiddenProbes(process.env.RC_FORBIDDEN),
+            });
+            console.log(v.message);
+            if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
+          '
+
+      # Written AFTER the guard, BEFORE the build: lib/buildInfo.js reads it and
+      # /api/health reports it as `commit`. Never committed to the repo.
+      - name: Stamp the commit this build serves
+        id: stamp
+        run: |
+          git rev-parse HEAD > BUILD_COMMIT
+          echo "sha=$(cat BUILD_COMMIT)" >> "$GITHUB_OUTPUT"
+          echo "staging commit: $(cat BUILD_COMMIT)"
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
+
+      - name: Deploy Cloud Run — APP-STAGING (auth ON)
+        run: |
+          # ⚠️ --update-env-vars MERGES (rule #20) — never --set-env-vars here.
+          # The key set is deploy.yml's deploy-app-staging set, key for key;
+          # test/realapp-staging-rail.test.js reds if the two drift apart.
+          # --min-instances 0: a QA tier holds no warm instance.
+          # ⚠️ No comment lines between backslash-continued lines (card rFZrx6fL).
+          gcloud run deploy "$STG_SERVICE" \
+            --source . \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service-account "${{ secrets.RUN_SERVICE_ACCOUNT }}" \
+            --allow-unauthenticated \
+            --memory 1Gi --cpu 2 --cpu-boost --timeout 600 --min-instances 0 --max-instances 20 \
+            --update-env-vars "^|^AGENT_ENGINE_RESOURCE=${{ secrets.AGENT_ENGINE_RESOURCE }}|SITE_IMAGES_BUCKET=${{ secrets.SITE_IMAGES_BUCKET }}|PUBLISHED_SITES_BUCKET=${{ secrets.PUBLISHED_SITES_BUCKET }}|USER_UPLOADS_BUCKET=${{ secrets.USER_UPLOADS_BUCKET }}|IMAGE_PROJECT=${{ secrets.IMAGE_PROJECT }}|IMAGE_REGION=global|IMAGE_MODEL=gemini-3-pro-image-preview|WARM_KEY=${{ secrets.WARM_KEY }}|FIREBASE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}|FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}|FIREBASE_AUTH_DOMAIN=opsagent-staging.firebaseapp.com|PUBLIC_BASE_URL=https://rapid-builder-stg.web.app|PUBLIC_MEDIA_BASE_URL=${{ secrets.PUBLIC_MEDIA_BASE_URL }}|ALLOWED_ORIGINS=https://rapid-builder-stg.web.app" \
+            --set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest" \
+            --quiet
+          gcloud run services update-traffic "$STG_SERVICE" --to-latest \
+            --project "$PROJECT_ID" --region "$REGION" --quiet
+
+      - name: Smoke test Cloud Run — APP-STAGING serves the staged commit, auth ON
+        env:
+          SHA: ${{ steps.stamp.outputs.sha }}
+        run: |
+          set -euo pipefail
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          echo "Service URL: $URL"
+          curl -sf "$URL/api/health" | tee /tmp/health-stg.json
+          grep -q '"agentEngine":true' /tmp/health-stg.json
+          grep -q '"auth":true' /tmp/health-stg.json
+          grep -q "\"commit\":\"$SHA\"" /tmp/health-stg.json \
+            || { echo "::error::Cloud Run did not report commit $SHA"; exit 1; }
+
+      - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
+        run: |
+          URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          sed -i "s#__API_BASE__#$URL#g" web/index.html web/board/board.js
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config=cloudbuild-staging-hosting.yaml \
+            --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
+
+      - name: Smoke test Hosting — APP-STAGING serves the staged commit
+        env:
+          SHA: ${{ steps.stamp.outputs.sha }}
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -sf "$STG_APP_URL/api/health" | tee /tmp/health-stg-hosting.json
+          grep -q '"auth":true' /tmp/health-stg-hosting.json
+          grep -q "\"commit\":\"$SHA\"" /tmp/health-stg-hosting.json \
+            || { echo "::error::$STG_APP_URL did not report commit $SHA"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$STG_APP_URL/")
+          if [ "$code" != "200" ]; then
+            echo "::error::$STG_APP_URL/ answered $code, expected 200 serving the real app."
+            exit 1
+          fi
+
+      # ── PROVENANCE — reads the guard's ACTUAL outcome (cards 22I0yUum / QpERt8db)
+      # always(): a refused or failed run still leaves a record, and on a refusal
+      # it prints no line that reads like a deploy receipt.
+      - name: Record what APP-STAGING was staged from
+        if: always()
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GUARD: ${{ steps.refguard.outcome }}
+          SHA: ${{ steps.stamp.outputs.sha }}
+          JOB: ${{ job.status }}
+        run: |
+          echo "--- real-app staging provenance (card mIQXYnxd) ---"
+          echo "ref       : $REF_NAME"
+          echo "ref check : $GUARD"
+          if [ "$GUARD" != "success" ] || [ -z "$SHA" ]; then
+            echo "RESULT    : REFUSED or NOT RUN — nothing was staged from this run."
+            exit 0
+          fi
+          echo "commit    : $SHA"
+          echo "job       : $JOB"
+          echo "served at : $STG_APP_URL (/api/health .commit)"
+          {
+            echo "### APP-STAGING"
+            echo ""
+            echo "- staging_sha: \`$SHA\` (job $JOB)"
+            echo "- ref: \`$REF_NAME\`"
+            echo "- check: $STG_APP_URL/api/health → \`commit\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -46,7 +46,7 @@ function triggers(text) {
   return out;
 }
 
-const EXPECT = { 'deploy-realapp.yml': 1, 'deploy.yml': 3 };
+const EXPECT = { 'deploy-realapp.yml': 1, 'deploy.yml': 3, 'deploy-realapp-staging.yml': 1 };
 
 for (const [file, jobs] of Object.entries(EXPECT)) {
   test(`${file}: every job runs on ubuntu-latest — a pool-pinned job in a public repo is never scheduled`, () => {
