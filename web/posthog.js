@@ -26,12 +26,13 @@
     catch (e) { /* never break the app for analytics */ }
   };
 
-  // Host gate (card EGVHefy0) — same list as web/analytics.js: only the
-  // production host loads PostHog. web.app, staging, previews and localhost
-  // make no config call and load no script, so they never pollute prod data.
-  var ANALYTICS_HOSTS = ['builder.opsagents.agency'];
-  var host = String((window.location && window.location.hostname) || '').toLowerCase().replace(/\.$/, '');
-  if (ANALYTICS_HOSTS.indexOf(host) === -1) return;
+  // Host gate (card EGVHefy0): this file does NOT decide which hosts report.
+  // web/analytics.js owns the one allow-list and publishes its decision as
+  // window.rsbAnalyticsOn; every page loads it before this file (both defer).
+  // Fail closed: anything but `true` (analytics.js missing or not yet run, a
+  // non-prod host) means no config call and no script, so web.app, staging,
+  // previews and localhost never pollute prod data.
+  if (window.rsbAnalyticsOn !== true) return;
 
   function loadSnippet() {
     // Official posthog-js loader snippet (array-stub → real SDK once loaded).

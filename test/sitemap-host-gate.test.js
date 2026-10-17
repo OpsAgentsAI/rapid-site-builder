@@ -14,7 +14,9 @@
 //   2. robots.txt names that sitemap and keeps every existing record.
 //   3. Both analytics bootstraps (web/analytics.js, web/posthog.js) run ONLY on
 //      builder.opsagents.agency: executed in a sandbox per host, every other
-//      host makes ZERO network calls.
+//      host makes ZERO network calls. The allow-list lives ONLY in analytics.js
+//      (window.rsbAnalyticsOn); posthog.js reads that decision and fails closed
+//      without it (CTO review 5556334518, bounce dry-host-gate).
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -142,11 +144,14 @@ test('robots.txt keeps every existing record (no crawler newly disallowed)', () 
 
 // ── 3. Analytics host gate ──────────────────────────────────────────────────
 
-// Execute a browser bootstrap in a sandbox at `hostname` and record every
-// network call it makes. fetch() returns a never-settling promise, so only the
-// synchronous decision "does this host call out at all" is observed.
-function runBootstrap(file, hostname) {
-  const calls = [];
+// Execute browser bootstraps IN ORDER in ONE page sandbox at `hostname`, the
+// way a page runs its `defer` scripts, and record every network call per file.
+// fetch() returns a never-settling promise, so only the synchronous decision
+// "does this host call out at all" is observed. `sources` maps a file to
+// replacement source text (to prove the single allow-list drives both files).
+function runPage(files, hostname, sources = {}) {
+  const perFile = {};
+  let calls = [];
   const sandbox = {
     location: { hostname, href: `https://${hostname}/`, protocol: 'https:' },
     document: {
@@ -159,9 +164,19 @@ function runBootstrap(file, hostname) {
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(read(file), sandbox, { filename: file });
-  return { calls, win: sandbox };
+  for (const file of files) {
+    calls = [];
+    vm.runInContext(sources[file] || read(file), sandbox, { filename: file });
+    perFile[file] = calls;
+  }
+  return { perFile, win: sandbox };
 }
+function runBootstrap(file, hostname) {
+  const { perFile, win } = runPage([file], hostname);
+  return { calls: perFile[file], win };
+}
+// Every page that loads posthog.js loads analytics.js before it.
+const PAGE = ['web/analytics.js', 'web/posthog.js'];
 
 const OFF_HOSTS = [
   'rapid-site-builder-app.web.app',          // the Hosting site behind the custom domain
@@ -195,21 +210,63 @@ test('analytics.js: web.app / staging / preview / localhost make ZERO network ca
   }
 });
 
-test('posthog.js: loads only on builder.opsagents.agency; silent elsewhere', () => {
-  const on = runBootstrap('web/posthog.js', 'builder.opsagents.agency');
-  assert.deepStrictEqual(on.calls, ['/api/client-config'], 'KNOWN-POSITIVE: prod host fetches its config');
+test('posthog.js: after analytics.js, loads only on builder.opsagents.agency; silent elsewhere', () => {
+  const on = runPage(PAGE, 'builder.opsagents.agency');
+  assert.strictEqual(on.win.rsbAnalyticsOn, true);
+  assert.deepStrictEqual(on.perFile['web/posthog.js'], ['/api/client-config'], 'KNOWN-POSITIVE: prod host fetches its config');
   for (const h of OFF_HOSTS) {
-    const { calls, win } = runBootstrap('web/posthog.js', h);
-    assert.deepStrictEqual(calls, [], `${h} called out: ${calls.join(', ')}`);
+    const { perFile, win } = runPage(PAGE, h);
+    assert.strictEqual(win.rsbAnalyticsOn, false, `${h}: analytics.js must publish OFF`);
+    assert.deepStrictEqual(perFile['web/posthog.js'], [], `${h} called out: ${perFile['web/posthog.js'].join(', ')}`);
     assert.doesNotThrow(() => win.rsbPH('signup', {}));
   }
 });
 
-test('both bootstraps carry the SAME host allow-list (one product host)', () => {
-  const list = (src) => (src.match(/var ANALYTICS_HOSTS = (\[[^\]]*\]);/) || [])[1];
-  const a = list(read('web/analytics.js'));
-  const p = list(read('web/posthog.js'));
-  assert.ok(a && p, 'KNOWN-POSITIVE: both files declare ANALYTICS_HOSTS');
-  assert.strictEqual(a, p);
-  assert.strictEqual(a, "['builder.opsagents.agency']");
+test('posthog.js: FAIL CLOSED when the analytics.js decision is missing or not exactly true', () => {
+  // Loaded alone, even on the prod host: no decision published -> OFF.
+  const alone = runBootstrap('web/posthog.js', 'builder.opsagents.agency');
+  assert.deepStrictEqual(alone.calls, [], 'posthog.js alone must not call out');
+  assert.doesNotThrow(() => alone.win.rsbPH('signup', {}));
+  // A truthy non-boolean is not a decision.
+  for (const v of ['true', 1, {}, null, undefined]) {
+    const { perFile } = runPage(['web/posthog.js'], 'builder.opsagents.agency', {
+      'web/posthog.js': `window.rsbAnalyticsOn = ${v === undefined ? 'undefined' : JSON.stringify(v)};\n` + read('web/posthog.js')
+    });
+    assert.deepStrictEqual(perFile['web/posthog.js'], [], `rsbAnalyticsOn=${JSON.stringify(v)} must be OFF`);
+  }
+});
+
+test('ONE host gate: analytics.js owns the allow-list, posthog.js only reads its decision', () => {
+  const a = read('web/analytics.js');
+  const p = read('web/posthog.js');
+  const decl = /var ANALYTICS_HOSTS = (\[[^\]]*\]);/g;
+  // KNOWN-POSITIVE: the single source exists, exactly once, with the one prod host.
+  const hits = [...a.matchAll(decl)].map((m) => m[1]);
+  assert.deepStrictEqual(hits, ["['builder.opsagents.agency']"]);
+  // posthog.js carries no copy: no list, no hostname rule of its own.
+  assert.ok(!/ANALYTICS_HOSTS/.test(p), 'posthog.js declares its own allow-list again');
+  assert.ok(!/hostname/.test(p), 'posthog.js derives its own host decision again');
+  assert.ok(/window\.rsbAnalyticsOn !== true/.test(p), 'posthog.js does not read the shared decision fail-closed');
+  // No other browser file re-declares the list.
+  for (const f of fs.readdirSync(path.join(ROOT, 'web')).filter((n) => n.endsWith('.js'))) {
+    if (f === 'analytics.js') continue;
+    assert.ok(!/ANALYTICS_HOSTS/.test(read(`web/${f}`)), `web/${f} carries a second allow-list`);
+  }
+});
+
+test('ONE host gate: changing the allow-list in analytics.js alone changes BOTH loaders', () => {
+  const extra = 'staging.builder.opsagents.agency';
+  // Baseline: not on the list -> both silent.
+  const before = runPage(PAGE, extra);
+  assert.deepStrictEqual(before.perFile['web/analytics.js'], []);
+  assert.deepStrictEqual(before.perFile['web/posthog.js'], []);
+  // Edit ONLY analytics.js: add the host. posthog.js source is untouched.
+  const edited = read('web/analytics.js').replace(
+    "var ANALYTICS_HOSTS = ['builder.opsagents.agency'];",
+    `var ANALYTICS_HOSTS = ['builder.opsagents.agency', '${extra}'];`
+  );
+  assert.notStrictEqual(edited, read('web/analytics.js'), 'KNOWN-POSITIVE: the edit applied');
+  const after = runPage(PAGE, extra, { 'web/analytics.js': edited });
+  assert.ok(after.perFile['web/analytics.js'].includes('/api/client-config'), 'analytics.js did not follow its own list');
+  assert.deepStrictEqual(after.perFile['web/posthog.js'], ['/api/client-config'], 'posthog.js did not follow the one list');
 });

@@ -23,9 +23,10 @@
  *    operator binds POSTHOG_PROJECT_KEY - makes no network call to PostHog at
  *    all and logs nothing to the console. window.rsbCapture(event, props).
  *
- * Both are complete no-ops when unconfigured (judge clone, local dev): nothing
- * is imported, no script loads, and rsbTrack()/rsbCapture() silently do
- * nothing. Analytics never blocks the app and the public repo carries no IDs.
+ * Both are complete no-ops on every host but builder.opsagents.agency (host
+ * gate below, card EGVHefy0) and when unconfigured (judge clone, local dev):
+ * nothing is imported, no script loads, and rsbTrack()/rsbCapture() silently
+ * do nothing. Analytics never blocks the app and the public repo carries no IDs.
  */
 (function () {
   'use strict';
@@ -38,9 +39,18 @@
   // web.app/test visits were counted as product traffic (9 of 23 users in
   // Aug 2026). Analytics now runs ONLY on the production host; everywhere else
   // both systems are complete no-ops: no config fetch, no script, no event.
+  //
+  // THIS IS THE ONLY COPY of the allow-list and the hostname rule. The decision
+  // is published as window.rsbAnalyticsOn (true | false) and web/posthog.js
+  // reads it instead of re-deciding: every page that loads posthog.js loads
+  // this file first, both `defer`, so document order guarantees it has run.
+  // posthog.js treats anything but `true` (missing, undefined) as OFF, so a
+  // page that loads posthog.js without this file reports nothing.
+  // Adding a prod host = one edit, here.
   var ANALYTICS_HOSTS = ['builder.opsagents.agency'];
   var host = String((window.location && window.location.hostname) || '').toLowerCase().replace(/\.$/, '');
-  if (ANALYTICS_HOSTS.indexOf(host) === -1) {
+  window.rsbAnalyticsOn = ANALYTICS_HOSTS.indexOf(host) !== -1;
+  if (!window.rsbAnalyticsOn) {
     window.rsbCapture = function () {};
     window.rsbTrack = function () {};
     return;
