@@ -218,8 +218,21 @@ jobs:
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
-          curl -sf "$URL/api/health" | tee /tmp/health.json
-          grep -q '"agentEngine":true' /tmp/health.json
+          set -euo pipefail
+          # Card i2xV0dn0 — NO FILE. gha-runner-1 hosts runner1..runner5 sharing ONE
+          # /tmp, so a fixed path is owned by whichever runner user wrote it first
+          # (mode 644) and every other user gets `tee: Permission denied`. That made
+          # this step's result a LOTTERY on the runner draw — and because the pipeline
+          # takes tee's status under `bash -e`, it aborted BEFORE the greps, so the
+          # fail-closed auth assertion never ran and the Hosting steps after it were
+          # skipped while Cloud Run already had the new code.
+          # Holding the body in a variable removes the shared path entirely: nothing to
+          # own, nothing to collide, nothing to clean up. `pipefail` makes a curl
+          # failure fail AS a curl failure instead of surfacing as a confusing grep miss.
+          HEALTH=$(curl -sf --max-time 20 "$URL/api/health")
+          printf '%s\n' "$HEALTH"
+          [ -n "$HEALTH" ] || { echo "::error::/api/health returned an EMPTY body — a 200 with no payload is not a pass"; exit 1; }
+          printf '%s' "$HEALTH" | grep -q '"agentEngine":true'
 
       - name: Deploy Firebase Hosting — STAGING sites, via Cloud Build (native metadata ADC)
         run: |
@@ -394,13 +407,26 @@ jobs:
         run: |
           URL=$(gcloud run services describe "$STG_SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
-          curl -sf "$URL/api/health" | tee /tmp/health-stg.json
-          grep -q '"agentEngine":true' /tmp/health-stg.json
+          set -euo pipefail
+          # Card i2xV0dn0 — NO FILE. gha-runner-1 hosts runner1..runner5 sharing ONE
+          # /tmp, so a fixed path is owned by whichever runner user wrote it first
+          # (mode 644) and every other user gets `tee: Permission denied`. That made
+          # this step's result a LOTTERY on the runner draw — and because the pipeline
+          # takes tee's status under `bash -e`, it aborted BEFORE the greps, so the
+          # fail-closed auth assertion never ran and the Hosting steps after it were
+          # skipped while Cloud Run already had the new code.
+          # Holding the body in a variable removes the shared path entirely: nothing to
+          # own, nothing to collide, nothing to clean up. `pipefail` makes a curl
+          # failure fail AS a curl failure instead of surfacing as a confusing grep miss.
+          HEALTH=$(curl -sf --max-time 20 "$URL/api/health")
+          printf '%s\n' "$HEALTH"
+          [ -n "$HEALTH" ] || { echo "::error::/api/health returned an EMPTY body — a 200 with no payload is not a pass"; exit 1; }
+          printf '%s' "$HEALTH" | grep -q '"agentEngine":true'
           # FAIL-CLOSED. lib/auth.js: AUTH_ENABLED = FIREBASE_PROJECT_ID &&
           # FIREBASE_API_KEY && SESSION_SECRET. A deploy that silently lost any
           # one of the three would otherwise stand up an ungated "QA" tier and
           # report success — the exact shape this card's board keeps producing.
-          grep -q '"auth":true' /tmp/health-stg.json
+          printf '%s' "$HEALTH" | grep -q '"auth":true'
 
       - name: Deploy Firebase Hosting — APP-STAGING, via Cloud Build (native metadata ADC)
         run: |
@@ -424,9 +450,21 @@ jobs:
         run: |
           set -euo pipefail
           sleep 5
-          curl -sf "$STG_APP_URL/api/health" | tee /tmp/health-stg-hosting.json
-          grep -q '"agentEngine":true' /tmp/health-stg-hosting.json
-          grep -q '"auth":true' /tmp/health-stg-hosting.json
+          # Card i2xV0dn0 — NO FILE. gha-runner-1 hosts runner1..runner5 sharing ONE
+          # /tmp, so a fixed path is owned by whichever runner user wrote it first
+          # (mode 644) and every other user gets `tee: Permission denied`. That made
+          # this step's result a LOTTERY on the runner draw — and because the pipeline
+          # takes tee's status under `bash -e`, it aborted BEFORE the greps, so the
+          # fail-closed auth assertion never ran and the Hosting steps after it were
+          # skipped while Cloud Run already had the new code.
+          # Holding the body in a variable removes the shared path entirely: nothing to
+          # own, nothing to collide, nothing to clean up. `pipefail` makes a curl
+          # failure fail AS a curl failure instead of surfacing as a confusing grep miss.
+          HEALTH=$(curl -sf --max-time 20 "$STG_APP_URL/api/health")
+          printf '%s\n' "$HEALTH"
+          [ -n "$HEALTH" ] || { echo "::error::/api/health returned an EMPTY body — a 200 with no payload is not a pass"; exit 1; }
+          printf '%s' "$HEALTH" | grep -q '"agentEngine":true'
+          printf '%s' "$HEALTH" | grep -q '"auth":true'
           # `/` must serve the app: 200, never a 301 (that would mean this tier
           # inherited the retirement redirects) and never a 404 (that would mean
           # the static bundle did not ship).
