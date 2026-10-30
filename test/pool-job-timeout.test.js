@@ -14,24 +14,20 @@ const path = require('node:path');
 
 const WF = path.join(__dirname, '..', '.github', 'workflows');
 
+// ONE parser and ONE pool predicate for the whole repo (65pcQtze rework): the job
+// split is the vendored workflow parser (#92) and "is this a pool job" is the same
+// runsOnPool that test/pool-node-setup.test.js audits with. This file used to carry
+// its own line walker whose `jobs:` / job-head regexes rejected a trailing comment,
+// so a pool job written `  deploy:  # note` was never checked for a timeout.
+const { strip, jobsOf } = require('./vendor/workflow-parse.js');
+const { runsOnPool } = require('../lib/poolNodeRuntime');
+
 /** Jobs of one workflow: {name, pool, timeout}. Reads LIVE lines only (comments never count). */
 function parseJobs(text) {
-  const jobs = [];
-  let inJobs = false;
-  let cur = null;
-  for (const line of text.split('\n')) {
-    if (/^\s*#/.test(line)) continue;
-    if (/^jobs:\s*$/.test(line)) { inJobs = true; continue; }
-    if (!inJobs) continue;
-    if (/^\S/.test(line)) break; // left the jobs: block
-    const j = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
-    if (j) { cur = { name: j[1], pool: false, timeout: null }; jobs.push(cur); continue; }
-    if (!cur) continue;
-    if (/^    runs-on:.*self-hosted/.test(line)) cur.pool = true;
-    const t = line.match(/^    timeout-minutes:\s*(\d+)\s*(?:#.*)?$/);
-    if (t) cur.timeout = Number(t[1]);
-  }
-  return jobs;
+  return jobsOf(strip(text)).map((job) => {
+    const t = /^    timeout-minutes:[ \t]*(\d+)[ \t]*(?:#.*)?$/m.exec(job.text);
+    return { name: job.name, pool: runsOnPool(job), timeout: t ? Number(t[1]) : null };
+  });
 }
 
 test('KNOWN-POSITIVE: the pre-fix deploy-engine shape reads as an unbounded pool job', () => {
@@ -42,6 +38,14 @@ test('KNOWN-POSITIVE: the pre-fix deploy-engine shape reads as an unbounded pool
 test('a comment that mentions timeout-minutes does not count as one', () => {
   const t = 'jobs:\n  a:\n    runs-on: [self-hosted]\n    # timeout-minutes: 5\n';
   assert.equal(parseJobs(t)[0].timeout, null);
+});
+
+test('REGRESSION: a trailing comment on `jobs:` or a job head does not hide a pool job', () => {
+  const t = 'jobs:  # all\n  deploy:  # note\n    runs-on: [self-hosted, linux, x64, gcp]\n    steps:\n      - run: x\n';
+  assert.deepEqual(parseJobs(t), [{ name: 'deploy', pool: true, timeout: null }]);
+  // CONTROL: a hosted job whose comment mentions the pool is not a pool job.
+  const hosted = 'jobs:\n  deploy:\n    runs-on: ubuntu-latest  # was self-hosted\n';
+  assert.deepEqual(parseJobs(hosted), [{ name: 'deploy', pool: false, timeout: null }]);
 });
 
 test('every self-hosted pool job in every workflow declares a sane timeout-minutes', () => {
