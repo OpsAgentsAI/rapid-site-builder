@@ -1,0 +1,60 @@
+name: Stage Real App (APP-STAGING, dispatch-only)
+
+# ── MAIN'S COPY IS A REGISTRATION STUB. IT DEPLOYS NOTHING. (card Ese6i9Ke) ──
+# The real staging rail lives on `real-app` (card mIQXYnxd, PR #114). GitHub
+# only registers a workflow_dispatch-only workflow, and only accepts
+# `gh workflow run deploy-realapp-staging.yml`, when a file of THIS PATH exists
+# on the default branch. Before this file, every dispatch answered
+# `HTTP 404: workflow deploy-realapp-staging.yml not found on the default branch`.
+#
+# A dispatch runs the DISPATCHED ref's copy of the file:
+#   gh workflow run deploy-realapp-staging.yml --ref real-app -f sha=<sha>
+#     -> runs REAL-APP's copy: the real rail, with its own deploy-line guard.
+#   gh workflow run deploy-realapp-staging.yml --ref main (or any branch cut
+#   from main)
+#     -> runs THIS file, which refuses unconditionally, before anything else.
+#
+# Why a stub and not a byte-identical copy of real-app's file: real-app's copy
+# reads its ref policy row from lib/deployRefPolicy.js, a row main does not
+# have, and needs real-app's lib/buildInfo.js. On main it could only ever fail
+# by accident, and it would put a credentialed deploy job on a branch whose
+# bytes must never be staged by this rail. This stub has no checkout, no
+# credentials, no secrets, no id-token, no concurrency group (joining the
+# `deploy` group could cancel a queued deploy.yml run) and no deploy step.
+# test/realapp-staging-registration.test.js pins all of that and executes the
+# refusal on main, real-app and a card branch.
+#
+# ⚠️ MERGING main INTO real-app: this path is an add/add conflict. KEEP
+# REAL-APP'S FILE. If this stub ever lands on real-app, a real-app dispatch is
+# refused loudly by the step below (it names that cause) instead of staging.
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Same input as real-app's copy, so a dispatch that passes -f sha reaches
+      # the refusal below instead of being rejected for an unknown input.
+      sha:
+        description: 'Full 40-character commit SHA on the real-app line to stage (blank = tip of the dispatched ref)'
+        required: false
+        default: ''
+        type: string
+
+# Least privilege: this workflow needs no token scope at all.
+permissions: {}
+
+jobs:
+  refuse:
+    name: Deploy-line guard — main's copy refuses every ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refuse — this file is main's registration stub, not the rail
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "::error::REFUSED: deploy-realapp-staging.yml was dispatched on ref '$REF_NAME', which runs MAIN's registration stub (card Ese6i9Ke). It stages nothing on any ref."
+          echo "The real-app staging rail exists only on real-app. Re-dispatch with: gh workflow run deploy-realapp-staging.yml --ref real-app [-f sha=<real-app commit>]"
+          if [ "$REF_NAME" = "real-app" ]; then
+            echo "::error::real-app is running the STUB: a main->real-app merge overwrote real-app's rail with main's copy. Restore real-app's .github/workflows/deploy-realapp-staging.yml."
+          fi
+          exit 1
