@@ -23,6 +23,7 @@ const { heroImageUrl, normCategory, normStyle, inferCategory, CATEGORIES } = req
 const { saveSite, loadSite, rememberDeviceSite, listDeviceSites, saveLlms, loadLlms, listSitesByOwner, listAllSites, loadSiteMeta, saveSiteDomain } = require('./lib/store');
 const domains = require('./lib/domains');
 const { llmsTxt } = require('./lib/llmeo');
+const { sitemapXml } = require('./lib/sitemap');
 const auth = require('./lib/auth');
 const { adminKeyOk, sessionIsAdmin } = require('./lib/admin');
 const uploads = require('./lib/uploads');
@@ -1002,6 +1003,12 @@ app.get('/api/admin/tenants', async (req, res) => {
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'web', 'index.html')));
 app.get(['/board', '/board/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'board', 'index.html')));
 app.get(['/campfire', '/campfire/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'campfire', 'index.html')));
+// Card EGVHefy0: the builder's OWN public pages only, always on the canonical
+// origin (never /sites/* — lib/sitemap.js refuses it). robots.txt names this URL.
+app.get('/sitemap.xml', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.type('application/xml').send(sitemapXml());
+});
 // The admin shell carries no data and no auth-scheme detail — it just runs the
 // standard Google sign-in and calls /api/admin/sites, which is the real gate.
 app.get(['/admin', '/admin/'], (_req, res) => res.sendFile(path.join(__dirname, 'web', 'admin', 'index.html')));

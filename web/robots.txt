@@ -33,3 +33,7 @@ Allow: /
 
 User-agent: CCBot
 Allow: /
+
+# The builder's own public pages (card EGVHefy0). Customer sites under /sites/
+# are deliberately NOT in it — they belong to their owners.
+Sitemap: https://builder.opsagents.agency/sitemap.xml
