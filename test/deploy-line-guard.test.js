@@ -213,7 +213,9 @@ test('every policy row\'s workflow probes its forbidden lines and hands the code
     assert.match(g, /\.mustNotBeAncestorOf\.join\(' '\)/, `${file}: the forbidden list must be READ from the policy row, never typed into the workflow`);
     assert.ok(g.includes(`DEPLOY_REF_POLICY['${file}'].mustNotBeAncestorOf`), `${file}: must read ITS OWN row's forbidden list`);
     assert.match(g, /for REF in \$FORBIDDEN; do/, `${file}: no probe loop over the forbidden refs`);
-    assert.match(g, /git merge-base --is-ancestor HEAD "refs\/remotes\/origin\/\$REF" \|\| frc=\$\?/, `${file}: the forbidden probe must capture its exit code with || frc=$? (bash -e)`);
+    // The probed commit is HEAD, or — in the staging rail, whose guard judges a
+    // requested SHA from the trusted dispatched tree (card mIQXYnxd) — "$C".
+    assert.match(g, /git merge-base --is-ancestor (HEAD|"\$C") "refs\/remotes\/origin\/\$REF" \|\| frc=\$\?/, `${file}: the forbidden probe must capture its exit code with || frc=$? (bash -e)`);
     assert.match(g, /PROBES="\$PROBES \$REF=\$frc"/, `${file}: probe results must be accumulated as REF=CODE`);
     assert.match(g, /RC_FORBIDDEN="\$PROBES" node -e/, `${file}: the probes must reach node through env, not interpolation`);
     assert.match(g, /parseForbiddenProbes\(process\.env\.RC_FORBIDDEN\)/, `${file}: the decision must receive the parsed probes`);
