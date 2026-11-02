@@ -35,7 +35,12 @@ const WF = path.join(REPO, '.github', 'workflows');
 
 /** Branch names a workflow file's `on:` block lists, per event. */
 function triggerBranches(yamlText, event) {
-  const re = new RegExp(`\\n  ${event}:\\n(?:[^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
+  // Only lines indented UNDER the event (4+ spaces) may sit between the event
+  // key and its `branches:`. The old `[^\\n]*` let an UNFILTERED event borrow
+  // the NEXT event's branch list, so `pull_request:` with no filter followed by
+  // `push: branches:[main]` read as [main]: the unfiltered, fires-everywhere
+  // case looked safe (card SFPFwKu8, caught by the control test below).
+  const re = new RegExp(`\\n  ${event}:\\n(?:    [^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
   const m = re.exec(yamlText);
   if (!m) return null;
   return m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
@@ -112,6 +117,17 @@ test('the reason it cannot: no ci.yml ON real-app fires for real-app', () => {
     files.includes('ci-realapp.yml'),
     'real-app lost ci-realapp.yml — it is now ungated, which is worse than the clause this card removed',
   );
+});
+
+test('control: the real-app ci.yml check really discriminates (fires-for-real-app shapes are caught)', () => {
+  // Card SFPFwKu8: proves the premise test above can fail. An unfiltered event
+  // must read as null (fires everywhere), never borrow the next event's list.
+  const inert = 'on:\n  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n';
+  const live = 'on:\n  pull_request:\n    branches: [main, real-app]\n  push:\n    branches: [main]\n';
+  const unfiltered = 'on:\n  pull_request:\n  push:\n    branches: [main]\n';
+  assert.deepEqual(triggerBranches('\n' + inert, 'pull_request'), ['main']);
+  assert.ok(triggerBranches('\n' + live, 'pull_request').includes('real-app'));
+  assert.equal(triggerBranches('\n' + unfiltered, 'pull_request'), null);
 });
 
 // Card vpukxEgQ (09PBYCJY rule 2): ci.yml gained a `wif-pr-reachability` job as
