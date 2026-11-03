@@ -24,6 +24,7 @@ const { spawnSync } = require('node:child_process');
 
 const { DEPLOY_REF_POLICY, refDeployVerdict } = require('../lib/deployRefPolicy');
 const { readBuildCommit, BUILD_COMMIT_FILE } = require('../lib/buildInfo');
+const { stepRun } = require('./helpers/workflowStep');
 
 const REPO = path.join(__dirname, '..');
 const FILE = 'deploy-realapp-staging.yml';
@@ -263,21 +264,6 @@ test('/api/health reports commit (null without a stamp) and the Cloud Run revisi
 // whose own lib/deployRefPolicy.js always allows would pass its own guard.
 // These tests execute the guard step's real shell, extracted from the
 // workflow, against a scratch repository.
-
-/** The `run: |` body of the step named `name`, dedented. */
-function stepRun(raw, name) {
-  const lines = raw.split('\n');
-  const at = lines.findIndex((l) => l.includes(`- name: ${name}`));
-  assert.ok(at > -1, `step ${name} not found`);
-  const r = lines.findIndex((l, i) => i > at && /^\s+run: \|\s*$/.test(l));
-  const body = [];
-  for (let i = r + 1; i < lines.length; i++) {
-    if (lines[i].trim() === '') { body.push(''); continue; }
-    if (!/^ {10}/.test(lines[i])) break;
-    body.push(lines[i].slice(10));
-  }
-  return body.join('\n');
-}
 
 const git = (cwd, ...args) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
