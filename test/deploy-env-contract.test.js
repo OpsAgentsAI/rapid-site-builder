@@ -26,6 +26,13 @@
 // freezes: after this, dropping a key from deploy.yml is a visible, reviewed
 // edit to the pin rather than a silent deletion in production.
 //
+// DELIBERATE DROP (card 6zAFgnSi, 2026-10-04): GA4_MEASUREMENT_ID (G-T8S1JFMTH3) is removed
+// from the pin and from deploy.yml. Re-measured the same way on 2026-10-04 (~08:5x IDT): the
+// live service still had these 14 keys including GA4_MEASUREMENT_ID, i.e. the pin and the live
+// service agreed before this change. The next deploy therefore REPLACES the set without that one
+// key ON PURPOSE — rapid-site-builder(-he).web.app 301 every path to builder.opsagents.agency,
+// which tags with its own ID, and the stream is being deleted (card mCIbD1Ja). 13 keys remain.
+//
 // TIER NAMING (the names read backwards — say the tier, never the site name):
 //   RETIRED     = deploy.yml          job deploy-staging     -> rapid-builder-proxy   + rapid-site-builder(-he)
 //   APP-STAGING = deploy.yml          job deploy-app-staging -> rapid-builder-app-stg + rapid-builder-stg
@@ -59,7 +66,6 @@ const STAGING_ENV_KEYS = [
   'AGENT_ENGINE_RESOURCE',
   'ALLOWED_ORIGINS',
   'CANONICAL_APP_URL',
-  'GA4_MEASUREMENT_ID',
   'IMAGE_MODEL',
   'IMAGE_PROJECT',
   'IMAGE_REGION',

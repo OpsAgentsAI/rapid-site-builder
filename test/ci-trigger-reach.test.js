@@ -5,7 +5,8 @@
  * ── THE DEFECT ─────────────────────────────────────────────────────────────
  * `main`'s ci.yml declared `branches: [main, real-app]` on BOTH `push` and
  * `pull_request`. Both were inert. A workflow file is resolved from the branch
- * that owns the event, and `real-app` has no `ci.yml`:
+ * that owns the event, and `real-app` had no `ci.yml` (it now has main's copy,
+ * which triggers on `main` only — still inert there; see the premise test):
  *
  *   push to real-app            resolves from real-app       -> never runs
  *   pull_request INTO real-app  resolves from the BASE, which IS real-app
@@ -34,7 +35,12 @@ const WF = path.join(REPO, '.github', 'workflows');
 
 /** Branch names a workflow file's `on:` block lists, per event. */
 function triggerBranches(yamlText, event) {
-  const re = new RegExp(`\\n  ${event}:\\n(?:[^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
+  // Only lines indented UNDER the event (4+ spaces) may sit between the event
+  // key and its `branches:`. The old `[^\\n]*` let an UNFILTERED event borrow
+  // the NEXT event's branch list, so `pull_request:` with no filter followed by
+  // `push: branches:[main]` read as [main]: the unfiltered, fires-everywhere
+  // case looked safe (card SFPFwKu8, caught by the control test below).
+  const re = new RegExp(`\\n  ${event}:\\n(?:    [^\\n]*\\n)*?    branches:\\s*\\[([^\\]]*)\\]`);
   const m = re.exec(yamlText);
   if (!m) return null;
   return m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
@@ -72,23 +78,56 @@ test('ci.yml no longer claims to gate real-app on either event', () => {
   }
 });
 
-test('the reason it cannot: real-app genuinely has no ci.yml', () => {
+test('the reason it cannot: no ci.yml ON real-app fires for real-app', () => {
   // ⚠️ Skips LOUDLY rather than passing on nothing when the ref is absent (a
   // shallow clone or a fork), matching this repo's existing deploy-ref tests.
+  //
+  // PREMISE UPDATE (card ZikVJXBp, 2026-09-30): real-app used to have NO ci.yml.
+  // Since 22909d9 ("merge main into real-app", card xe1q8uHa) it carries main's
+  // ci.yml — whose triggers name only `main`. A workflow resolves from the branch
+  // that owns the event, so on real-app that copy is still INERT: push to
+  // real-app and PRs into real-app never run it. The invariant this card needs
+  // was never "the file is absent"; it is "no ci.yml reachable from real-app
+  // fires for real-app", so real-app is gated ONLY by ci-realapp.yml. That is
+  // what is pinned now.
   const files = workflowsOn('origin/real-app');
   if (!files) {
     console.log('SKIP: origin/real-app not present — cannot verify (needs fetch-depth: 0)');
     return;
   }
   assert.ok(files.length > 0, 'origin/real-app has no workflows at all — measurement is wrong');
-  assert.ok(
-    !files.includes('ci.yml'),
-    'real-app now HAS a ci.yml — the premise of this card changed; re-read before re-adding the branch',
-  );
+  if (files.includes('ci.yml')) {
+    const realappCi = execFileSync('git', ['show', 'origin/real-app:.github/workflows/ci.yml'], {
+      cwd: REPO,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    for (const event of ['push', 'pull_request']) {
+      const branches = triggerBranches(realappCi, event);
+      // CONTROL: an unparseable trigger list must not read as "does not name real-app".
+      assert.ok(branches, `real-app's ci.yml has no ${event}.branches list — cannot tell whether it fires on real-app`);
+      assert.ok(
+        !branches.includes('real-app'),
+        `real-app's ci.yml now FIRES on real-app (${event}) — the premise of this card changed; ` +
+          're-read before re-adding the branch to main\'s ci.yml (real-app would then have two gates emitting the same check names)',
+      );
+    }
+  }
   assert.ok(
     files.includes('ci-realapp.yml'),
     'real-app lost ci-realapp.yml — it is now ungated, which is worse than the clause this card removed',
   );
+});
+
+test('control: the real-app ci.yml check really discriminates (fires-for-real-app shapes are caught)', () => {
+  // Card SFPFwKu8: proves the premise test above can fail. An unfiltered event
+  // must read as null (fires everywhere), never borrow the next event's list.
+  const inert = 'on:\n  pull_request:\n    branches: [main]\n  push:\n    branches: [main]\n';
+  const live = 'on:\n  pull_request:\n    branches: [main, real-app]\n  push:\n    branches: [main]\n';
+  const unfiltered = 'on:\n  pull_request:\n  push:\n    branches: [main]\n';
+  assert.deepEqual(triggerBranches('\n' + inert, 'pull_request'), ['main']);
+  assert.ok(triggerBranches('\n' + live, 'pull_request').includes('real-app'));
+  assert.equal(triggerBranches('\n' + unfiltered, 'pull_request'), null);
 });
 
 // Card vpukxEgQ (09PBYCJY rule 2): ci.yml gained a `wif-pr-reachability` job as

@@ -15,8 +15,12 @@
  * is a red nobody re-reads.
  *
  * ⚠️ THE ALLOWLIST BELOW IS DEBT, NOT AN EXEMPTION, AND IT CAN ONLY SHRINK.
- * It is empty: the four deploy-workflow ref guards it once pinned were fixed
- * by card XzS42jof. Three separate assertions keep the pin honest: a NEW unguarded job
+ * Two pool jobs still run node with no setup-node. Both live in DEPLOY
+ * workflows, which this lane may not edit (Tier C — Michal presses deploy-workflow
+ * changes), so they are pinned here with their evidence rather than silently
+ * tolerated. (It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
+ * and deploy.yml:ref-guard to ubuntu-latest, whose image ships node, so the
+ * shrink assertion below made us delete them — the allowlist working as designed.) Three separate assertions keep the pin honest: a NEW unguarded job
  * fails, an allowlisted job that got FIXED fails (remove the entry), and an
  * allowlisted job that no longer EXISTS fails. An allowlist that cannot rot is
  * the only kind worth having.
@@ -34,11 +38,15 @@ const {
 const REPO_ROOT = path.join(__dirname, '..');
 
 /**
- * file:job -> why it is still unguarded. Empty since card XzS42jof put
- * setup-node in the four deploy-workflow ref guards. Nothing may be added
- * without a card that owns its discharge.
+ * file:job -> why it is still unguarded. Every entry must be discharged by the
+ * Tier-C card that owns the deploy workflows; none may be added without one.
  */
-const KNOWN_UNGUARDED = {};
+const KNOWN_UNGUARDED = {
+  'deploy-engine.yml:deploy-engine':
+    'deploy workflow (Tier C). Dispatch-only, and its ref-guard step carries no `if:` — so the node call runs on EVERY dispatch.',
+  'preview.yml:ref-guard':
+    'deploy workflow (Tier C). Dispatch-only; its ref-guard step shells out to node with no setup-node before it.',
+};
 
 /** Write a throwaway repo skeleton holding exactly these workflow files. */
 const fixtureRepo = (files) => {
@@ -57,7 +65,16 @@ test('the census is not vacuous — it finds node-running jobs, and some are com
   const rows = auditRepo(REPO_ROOT);
   assert.ok(rows.length >= 8, `census collapsed to ${rows.length} rows — the matcher stopped matching`);
   assert.ok(rows.some((r) => r.guarded), 'no compliant job found at all: the setup-node matcher is broken');
-  assert.ok(rows.every((r) => r.pool), 'a non-pool job appeared; update this assertion rather than the rule');
+  // #101 (ZikVJXBp, 2026-10-01) moved this PUBLIC repo's 5 credential-free jobs to
+  // ubuntu-latest, because the self-hosted group refuses public repos; card
+  // wkTIv0Q2 plans to move them onto an isolated GCP runner. So the census is a
+  // MIX, and "every row is pool" stopped being a fact about the repo. What must
+  // hold is that the rule still has something to bite on: at least one POOL job
+  // runs node, so a pool-scoped guard is not vacuously green.
+  assert.ok(rows.some((r) => r.pool), 'no pool job runs node at all — the pool rule below would pass vacuously');
+  // A hosted row is compliant by definition (the hosted image ships node); it is
+  // counted so the census stays a census, never so it can excuse a pool row.
+  assert.ok(rows.filter((r) => !r.pool).every((r) => r.guarded), 'a hosted job was scored unguarded — the pool scoping broke');
 });
 
 test('every pool job that runs node sets node up first — except pinned, carded debt', () => {
@@ -86,15 +103,6 @@ test("this card's own fix is pinned by name, not merely by the aggregate", () =>
   const row = auditRepo(REPO_ROOT).find((r) => key(r) === 'prod-serving-alarm.yml:check');
   assert.ok(row, 'prod-serving-alarm.yml:check vanished from the census');
   assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm lost its setup-node step');
-});
-
-test('the four deploy ref guards (card XzS42jof) set node up before their first node call', () => {
-  const rows = auditRepo(REPO_ROOT);
-  for (const k of ['deploy-realapp.yml:deploy', 'deploy-engine.yml:deploy-engine', 'deploy.yml:ref-guard', 'preview.yml:ref-guard']) {
-    const row = rows.find((r) => key(r) === k);
-    assert.ok(row, `${k} vanished from the census`);
-    assert.strictEqual(row.setupNodeBeforeFirstUse, true, `${k} runs node before setup-node — its first dispatch exits 127`);
-  }
 });
 
 // ── The matcher, on synthetic fixtures with controls ────────────────────────
@@ -147,7 +155,85 @@ test('the live-tree parser sees real jobs, not an empty set (fail-loud, not vacu
   const code = loadWorkflow(REPO_ROOT, 'prod-serving-alarm.yml');
   const jobs = jobsOf(code);
   assert.strictEqual(jobs.length, 1, `expected 1 job in prod-serving-alarm.yml, got ${jobs.length}`);
-  assert.strictEqual(runsOnPool(jobs[0]), true, 'the gap-B alarm is no longer on the pool');
   assert.strictEqual(nodeRunSteps(jobs[0]).length, 1, 'the measure step no longer reads as a node invocation');
-  assert.ok(auditJob('prod-serving-alarm.yml', jobs[0]).guarded);
+  // The job's RUNNER is not pinned here: #101 moved it to ubuntu-latest and
+  // wkTIv0Q2 will move it to an isolated GCP runner. What is pinned is the
+  // property that survives either move — it sets node up itself, so landing back
+  // on a node-less image cannot reintroduce the exit-127 this card is about.
+  const row = auditJob('prod-serving-alarm.yml', jobs[0]);
+  assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm no longer sets node up before its first node call');
+  assert.ok(row.guarded, 'the gap-B alarm is scored unguarded');
+});
+
+// ── One parser, not two (65pcQtze rework, ref3-rsb-1819 review at 35630042) ──
+//
+// This file's library used to carry its own copy of the workflow parser that
+// test/vendor/workflow-parse.js already exports (#92). The copy drifted: its
+// `jobs:` and job-head regexes rejected a TRAILING comment, so a head written as
+// `  ref-guard:  # note` dropped that job out of the audit and the guard stayed
+// green over it. The lib now consumes the vendor's functions; these pin that.
+
+const vendor = require('./vendor/workflow-parse.js');
+const lib = require('../lib/poolNodeRuntime');
+
+test('the lib re-uses the vendored parser — the very same functions, not a fork', () => {
+  assert.strictEqual(lib.jobsOf, vendor.jobsOf, 'lib/poolNodeRuntime.js has its own jobsOf again — a fork stops learning');
+  assert.strictEqual(lib.workflowFiles, vendor.workflowFiles, 'lib/poolNodeRuntime.js has its own workflowFiles again');
+  assert.strictEqual(lib.loadWorkflow, vendor.load, 'lib/poolNodeRuntime.js has its own loader again');
+});
+
+test('REGRESSION: a trailing comment on `jobs:` or on a job head does not hide the job from the audit', () => {
+  const commented = 'name: f\non:\n  workflow_dispatch:\njobs:  # every job below is audited\n' +
+    '  ref-guard:  # note\n    runs-on: [self-hosted, linux, x64, gcp]\n    steps:\n      - name: s\n        run: node scripts/x.js\n';
+  const rows = auditRepo(fixtureRepo({ 'a.yml': commented }));
+  assert.strictEqual(rows.length, 1, `the commented job head dropped out of the audit (rows: ${JSON.stringify(rows)})`);
+  assert.strictEqual(rows[0].job, 'ref-guard');
+  assert.strictEqual(rows[0].guarded, false, 'a commented pool job with no setup-node was scored guarded');
+  // CONTROL: the identical job without the comments reads the same — the comment is the only variable.
+  const plain = commented.replace('jobs:  # every job below is audited', 'jobs:').replace('ref-guard:  # note', 'ref-guard:');
+  assert.deepStrictEqual(auditRepo(fixtureRepo({ 'a.yml': plain })), rows, 'the control (no comments) disagrees with the commented fixture');
+});
+
+test('runsOnPool reads every runs-on form, and a comment never makes a job pool', () => {
+  const job = (runsOn) => ({ name: 'j', text: `  j:\n    runs-on:${runsOn}\n    steps:\n      - run: x\n` });
+  assert.strictEqual(runsOnPool(job(' [self-hosted, linux, x64, gcp]')), true, 'flow list');
+  assert.strictEqual(runsOnPool(job(' self-hosted')), true, 'plain scalar');
+  assert.strictEqual(runsOnPool(job(" 'self-hosted'  # pool")), true, 'quoted scalar with a trailing comment');
+  assert.strictEqual(runsOnPool(job('\n      - self-hosted\n      - linux')), true, 'block list');
+  assert.strictEqual(runsOnPool(job('\n      group: pool\n      labels: [self-hosted, gcp]')), true, 'runner-group object');
+  // CONTROLS
+  assert.strictEqual(runsOnPool(job(' ubuntu-latest')), false, 'hosted scalar');
+  assert.strictEqual(runsOnPool(job(' ubuntu-latest  # was self-hosted before #101')), false, 'a trailing comment made a hosted job pool');
+  assert.strictEqual(runsOnPool({ name: 'j', text: '  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo self-hosted\n' }), false,
+    'a step body mentioning self-hosted made a hosted job pool');
+});
+
+test('command position includes shell keywords, wrappers and backticks', () => {
+  const cases = {
+    'if.yml': 'if node -e "process.exit(0)"; then echo ok; fi',
+    'then.yml': 'if true; then node x.js; fi',
+    'exec.yml': 'exec node server.js',
+    'time.yml': 'time npm ci',
+    'xargs.yml': 'ls *.js | xargs node',
+    'bashc.yml': 'bash -c "node x.js"',
+    'backtick.yml': 'V=`node -p 1`',
+  };
+  for (const [file, cmd] of Object.entries(cases)) {
+    const root = fixtureRepo({ [file]: poolJob(`      - name: s\n        run: |\n          ${cmd}`) });
+    assert.strictEqual(auditRepo(root).length, 1, `${file}: "${cmd}" was not seen as a node invocation`);
+    assert.strictEqual(auditRepo(root)[0].guarded, false, `${file}: missing setup-node was not flagged`);
+  }
+  // CONTROLS: the keyword alone, or node as an argument, is not a call.
+  for (const cmd of ['if [ -d node_modules ]; then echo cached; fi', 'echo "time to install node"', 'bash -c "echo node"']) {
+    const root = fixtureRepo({ 'c.yml': poolJob(`      - name: s\n        run: |\n          ${cmd}`) });
+    assert.deepStrictEqual(auditRepo(root), [], `"${cmd}" was read as a node invocation`);
+  }
+});
+
+test('a setup-node mention INSIDE a run body is not a setup-node step', () => {
+  const root = fixtureRepo({ 'a.yml': poolJob(
+    `      - name: notes\n        run: |\n          echo "uses: actions/setup-node@v4 would fix this"\n\n      - name: measure\n        run: node scripts/x.js`) });
+  const [row] = auditRepo(root);
+  assert.strictEqual(row.setupNodeCount, 0, 'text inside a run body was counted as a setup-node step');
+  assert.strictEqual(row.guarded, false, 'a job whose only setup-node is an echo was scored guarded');
 });
