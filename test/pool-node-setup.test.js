@@ -15,12 +15,12 @@
  * is a red nobody re-reads.
  *
  * ⚠️ THE ALLOWLIST BELOW IS DEBT, NOT AN EXEMPTION, AND IT CAN ONLY SHRINK.
- * Two pool jobs still run node with no setup-node. Both live in DEPLOY
- * workflows, which this lane may not edit (Tier C — Michal presses deploy-workflow
- * changes), so they are pinned here with their evidence rather than silently
- * tolerated. (It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
+ * It is EMPTY now. It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
  * and deploy.yml:ref-guard to ubuntu-latest, whose image ships node, so the
- * shrink assertion below made us delete them — the allowlist working as designed.) Three separate assertions keep the pin honest: a NEW unguarded job
+ * shrink assertion below made us delete them — the allowlist working as designed.
+ * Card XzS42jof then gave the last two pool jobs (deploy-engine.yml:deploy-engine,
+ * preview.yml:ref-guard) a setup-node step before their first node call, and
+ * deleted their entries. Three separate assertions keep the pin honest: a NEW unguarded job
  * fails, an allowlisted job that got FIXED fails (remove the entry), and an
  * allowlisted job that no longer EXISTS fails. An allowlist that cannot rot is
  * the only kind worth having.
@@ -41,12 +41,7 @@ const REPO_ROOT = path.join(__dirname, '..');
  * file:job -> why it is still unguarded. Every entry must be discharged by the
  * Tier-C card that owns the deploy workflows; none may be added without one.
  */
-const KNOWN_UNGUARDED = {
-  'deploy-engine.yml:deploy-engine':
-    'deploy workflow (Tier C). Dispatch-only, and its ref-guard step carries no `if:` — so the node call runs on EVERY dispatch.',
-  'preview.yml:ref-guard':
-    'deploy workflow (Tier C). Dispatch-only; its ref-guard step shells out to node with no setup-node before it.',
-};
+const KNOWN_UNGUARDED = {};
 
 /** Write a throwaway repo skeleton holding exactly these workflow files. */
 const fixtureRepo = (files) => {
@@ -103,6 +98,15 @@ test("this card's own fix is pinned by name, not merely by the aggregate", () =>
   const row = auditRepo(REPO_ROOT).find((r) => key(r) === 'prod-serving-alarm.yml:check');
   assert.ok(row, 'prod-serving-alarm.yml:check vanished from the census');
   assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm lost its setup-node step');
+});
+
+test('card XzS42jof: the last two pool ref guards set node up before their first node call, pinned by name', () => {
+  const rows = auditRepo(REPO_ROOT);
+  for (const k of ['deploy-engine.yml:deploy-engine', 'preview.yml:ref-guard']) {
+    const row = rows.find((r) => key(r) === k);
+    assert.ok(row, `${k} vanished from the census`);
+    assert.strictEqual(row.setupNodeBeforeFirstUse, true, `${k} runs node on the pool with no setup-node before it`);
+  }
 });
 
 // ── The matcher, on synthetic fixtures with controls ────────────────────────
