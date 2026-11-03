@@ -38,10 +38,22 @@ const wf = wfRaw
 
 // ── 1. THE DECISION ─────────────────────────────────────────────────────────
 
-test('exit 0 (ancestor or equal) allows the deploy', () => {
-  const v = refDeployVerdict(0, { dispatchedRef: EXPECTED_REF });
+test('exit 0 (ancestor or equal) allows the deploy — WITH the second probe saying "not on main"', () => {
+  // Card 8itdTRtX: this test used to pass exit 0 alone and expect allow. That
+  // was the fail-open opsagents-cto caught on PR #98 — once main is an ancestor
+  // of real-app, exit 0 is what a dispatch on MAIN measures too. The PROD row
+  // now requires a probe against main, so exit 0 alone is cannot-verify (see
+  // the next test) and this is the shape that allows.
+  const v = refDeployVerdict(0, { dispatchedRef: EXPECTED_REF, forbidden: [{ ref: 'main', exitCode: 1 }] });
   assert.equal(v.allow, true);
   assert.equal(v.verdict, 'allow');
+});
+
+test('exit 0 ALONE is no longer an allow — the PROD row demands proof the ref is not on main', () => {
+  const v = refDeployVerdict(0, { dispatchedRef: EXPECTED_REF });
+  assert.equal(v.allow, false, 'PR #67\'s one-probe call shape allowed a deploy — that is the 8itdTRtX fail-open');
+  assert.equal(v.verdict, 'cannot-verify');
+  assert.match(v.message, /NOT on the main line/);
 });
 
 test('exit 1 REFUSES, and the message names the ref to use instead', () => {
@@ -118,17 +130,21 @@ test('NEGATIVE TEST: real `main` is genuinely not on the real-app line', () => {
 
   const rc = spawnSync('git', ['merge-base', '--is-ancestor', mainRef, appRef], { cwd: repo })
     .status;
-  const v = refDeployVerdict(rc, { dispatchedRef: 'main' });
+  const onMain = spawnSync('git', ['merge-base', '--is-ancestor', mainRef, mainRef], { cwd: repo })
+    .status;
+  assert.equal(onMain, 0, 'git is not answering: main is not an ancestor of itself');
+  const v = refDeployVerdict(rc, { dispatchedRef: 'main', forbidden: [{ ref: 'main', exitCode: onMain }] });
 
-  // Not asserting rc === 1 outright: if someone forward-ports and the branches
-  // reconcile, main BECOMES a legitimate ancestor and this must not cry wolf.
-  // What is pinned is that the guard's verdict tracks the real git answer.
-  if (rc === 0) {
-    assert.equal(v.allow, true, 'main is now an ancestor — a dispatch on it would be legitimate');
-  } else {
-    assert.equal(v.allow, false, 'main is not an ancestor, so a dispatch on it must be REFUSED');
-    assert.equal(v.verdict, 'refuse');
-  }
+  // ⚠️ RETARGETED (card 8itdTRtX). This used to say: "if the branches
+  // reconcile, main BECOMES a legitimate ancestor and this must not cry wolf" —
+  // and asserted allow on rc === 0. That sentence is the fail-open: after the
+  // #70 ancestry merge main IS an ancestor of real-app, and a dispatch on main
+  // is still a dispatch of the wrong line onto PROD. The invariant that holds
+  // in BOTH worlds is that the FULL verdict refuses main — by the first probe
+  // before the merge, by the second after it.
+  assert.equal(v.allow, false, `a dispatch on main was ALLOWED onto PROD (is-ancestor main real-app -> ${rc})`);
+  assert.equal(v.verdict, 'refuse');
+  assert.equal(v.reason, rc === 0 ? 'shared-line' : 'off-line');
 });
 
 // ── 3. THE WIRING ───────────────────────────────────────────────────────────
