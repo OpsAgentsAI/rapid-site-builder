@@ -188,11 +188,28 @@ jobs:
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
-          curl -sf "$URL/api/health" | tee /tmp/health.json
-          grep -q '"agentEngine":true' /tmp/health.json
+          set -euo pipefail
+          # Card i2xV0dn0 — NO FILE. gha-runner-1 hosts runner1..runner5 sharing ONE
+          # /tmp, so a fixed path is owned by whichever runner user wrote it first
+          # (mode 644) and every other user gets `tee: Permission denied`. That made
+          # this step's result a LOTTERY on the runner draw — and because the pipeline
+          # takes tee's status under `bash -e`, it aborted BEFORE the greps, so the
+          # fail-closed auth assertion never ran and the Hosting steps after it were
+          # skipped while Cloud Run already had the new code.
+          # Holding the body in a variable removes the shared path entirely: nothing to
+          # own, nothing to collide, nothing to clean up. `pipefail` makes a curl
+          # failure fail AS a curl failure instead of surfacing as a confusing grep miss.
+          # ⚠️ This is the PROD workflow and it wrote the SAME filename as deploy.yml's
+          # staging step, so the two rails could collide with each other, not merely
+          # with a sibling runner user. Not named on the card; found by scanning every
+          # workflow rather than only the three steps the card measured.
+          HEALTH=$(curl -sf --max-time 20 "$URL/api/health")
+          printf '%s\n' "$HEALTH"
+          [ -n "$HEALTH" ] || { echo "::error::/api/health returned an EMPTY body — a 200 with no payload is not a pass"; exit 1; }
+          printf '%s' "$HEALTH" | grep -q '"agentEngine":true'
           # the real-app surface MUST report auth enabled (fail-closed safety net:
           # a deploy that silently lost the auth env would otherwise publish ungated)
-          grep -q '"auth":true' /tmp/health.json
+          printf '%s' "$HEALTH" | grep -q '"auth":true'
 
       - name: Deploy Firebase Hosting (separate site, via Cloud Build native ADC)
         run: |
