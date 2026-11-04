@@ -196,8 +196,9 @@ test('env keys equal deploy.yml APP-STAGING, key for key — and both MERGE (rul
   const theirs = code(jobBlock(RAW_STAGING, 'deploy-app-staging'));
   assert.deepEqual(envKeys(mine), envKeys(theirs));
   assert.doesNotMatch(mine, /--set-env-vars/);
-  const secrets = mine.match(/--set-secrets\s+"([^"]+)"/g) || [];
-  assert.deepEqual(secrets, ['--set-secrets "SESSION_SECRET=rapid-builder-session-secret:latest"']);
+  assert.doesNotMatch(mine, /--set-secrets/);
+  const secrets = mine.match(/--update-secrets\s+"([^"]+)"/g) || [];
+  assert.deepEqual(secrets, ['--update-secrets "SESSION_SECRET=rapid-builder-session-secret:latest"']);
   assert.match(mine, /PUBLIC_BASE_URL=https:\/\/rapid-builder-stg\.web\.app/);
   assert.match(mine, /ALLOWED_ORIGINS=https:\/\/rapid-builder-stg\.web\.app"/);
 });
