@@ -271,12 +271,18 @@ jobs:
       #
       # Do NOT "fix" a future issue here by dropping always() — that trades a
       # false record for NO record on precisely the runs it exists to serve.
+      #
+      # ⚠️ THE GUARD PASSING DOES NOT MEAN THE DEPLOY DID (card usFFTOul). A run
+      # whose Cloud Run, traffic or Hosting step failed after the guard used to
+      # print the same receipt as a good one, so `job.status` decides that half.
+      # The commit is still printed, as `attempted`, and never as `commit`.
       - name: Record what this PROD surface was deployed from
         if: always()
         env:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           GUARD: ${{ steps.refguard.outcome }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           EXPECTED=$(node -p "require('./lib/deployRefPolicy').DEPLOY_REF_POLICY['deploy-realapp.yml'].expectedRef")
           echo "--- real-app provenance (cards 22I0yUum / eKfog19I) ---"
@@ -286,6 +292,13 @@ jobs:
             echo "RESULT    : REFUSED or NOT RUN — nothing was deployed from this run."
             echo "            No commit is recorded here on purpose: printing one would read"
             echo "            like a deploy receipt for a deploy that did not happen."
+            exit 0
+          fi
+          if [ "$JOB_STATUS" != "success" ]; then
+            echo "RESULT    : DEPLOY $(printf '%s' "$JOB_STATUS" | tr '[:lower:]' '[:upper:]') — a step after the ref guard did not succeed."
+            echo "attempted : $SHA"
+            echo "            This is not a record of what PROD serves. Cloud Run may have been"
+            echo "            updated before the failure; read /api/health and the Hosting release."
             exit 0
           fi
           echo "commit    : $SHA"
