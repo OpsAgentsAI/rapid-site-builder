@@ -148,7 +148,9 @@ test('the ROOT argument scans that directory; a ROOT that is not a directory exi
 
 // ── half 2: every uploading workflow job runs it, in the right place ───────
 
-const UPLOAD = /--source[ =]|\bgcloud\s+builds\s+submit\b/;
+// `--source` followed by a PATH (`.`, `./x`, `/x`, `$DIR`), so a script flag
+// like divergence-alarm.yml's `--source main` (a branch name) is not an upload.
+const UPLOAD = /--source[ =]["']?[.\/$]|\bgcloud\s+(?:builds\s+submit|app\s+deploy)\b/;
 const SED_WEB = /\bsed\s+-i\b.*\bweb\//;
 const CHECKOUT = /uses:\s*actions\/checkout@|\bgit\s+(?:-C\s+\S+\s+)?checkout\b/;
 const INVOKE = /^\s*(?:run:\s*)?bash\s+(?:scripts\/refuse-symlinks\.sh|"?\$\{?RUNNER_TEMP\}?\/refuse-symlinks\.sh"?)\b/;
@@ -204,6 +206,9 @@ test('RED-FIRST: the order verdict refuses each broken shape and accepts the fix
   assert.match(verdict(head + check + '      - run: git checkout --detach "$TARGET"\n' + up).why, /re-shapes the tree/);
   assert.equal(verdict(head + check + up).ok, true, 'fixed shape');
   assert.equal(verdict(head + '      - run: echo no upload here\n'), null, 'a job that uploads nothing is not judged');
+  assert.equal(verdict(head + '      - run: node scripts/check-branch-divergence.js --source main --target real-app\n'), null,
+    '`--source <branch>` on a repo script is not a source upload');
+  assert.notEqual(verdict(head + '      - run: gcloud run deploy svc --source="$GITHUB_WORKSPACE" --quiet\n'), null, '--source=$DIR is an upload');
 });
 
 const NAMED = { 'deploy.yml': 2, 'deploy-realapp.yml': 1 };
