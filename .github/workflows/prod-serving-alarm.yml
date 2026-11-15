@@ -67,14 +67,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # LOAD-BEARING, not a version pin (card yXnplL83). The pool image has NO
-      # node/npm (measured on a self-hosted runner: `node: command not found`,
-      # exit 127, first seen run 36134275689) — the exact same finding ci.yml's
-      # `test` job already recorded for this same pool. This step is missing,
-      # not optional: without it every scheduled run of this alarm fails before
-      # measuring anything, which is a false "cannot tell" reported as nothing
-      # (no red, no summary) rather than the real gap-B signal this workflow
-      # exists to carry.
+      # This job runs on GitHub-hosted `ubuntu-latest` (runs-on above), not on
+      # the self-hosted pool, so node is already on the runner. The step pins
+      # Node 20, so `node scripts/check-prod-serving.js` runs on the same major
+      # version as ci.yml's test job (card eLdnCPTu). It was added by card
+      # yXnplL83 while this job still ran on the self-hosted pool, whose image
+      # has no node/npm (`node: command not found`, exit 127, run 36134275689).
+      # Keep it: it is harmless on a hosted runner and stays load-bearing if
+      # the job ever moves back to the pool.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
