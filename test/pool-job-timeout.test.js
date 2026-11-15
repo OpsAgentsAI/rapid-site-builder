@@ -63,3 +63,12 @@ test('every self-hosted pool job in every workflow declares a sane timeout-minut
   assert.ok(seen.includes('deploy-engine.yml:deploy-engine'), seen.join(','));
   assert.ok(seen.includes('preview.yml:deploy'), seen.join(','));
 });
+
+test('QRm63h1O: an expression or group-only runs-on is a pool job here too (fail closed), a hosted one is not', () => {
+  const expr = 'jobs:\n  a:\n    runs-on: ${{ inputs.runner }}\n    steps:\n      - run: x\n';
+  const group = 'jobs:\n  a:\n    runs-on:\n      group: pool\n    steps:\n      - run: x\n';
+  assert.deepEqual(parseJobs(expr), [{ name: 'a', pool: true, timeout: null }]);
+  assert.deepEqual(parseJobs(group), [{ name: 'a', pool: true, timeout: null }]);
+  // CONTROL
+  assert.deepEqual(parseJobs('jobs:\n  a:\n    runs-on: ubuntu-latest\n'), [{ name: 'a', pool: false, timeout: null }]);
+});

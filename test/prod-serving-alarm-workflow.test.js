@@ -1,13 +1,13 @@
 'use strict';
-// Card yXnplL83 — the "Measure gap B" job in prod-serving-alarm.yml runs on the
-// self-hosted [self-hosted, linux, x64, gcp] pool and shells out to
-// `node scripts/check-prod-serving.js`. That pool image has NO node/npm
-// (ci.yml's `test` job and divergence-alarm.yml's `check` job both already
-// carry the same finding and both already carry `actions/setup-node`). This
-// job did not, so every scheduled run failed before measuring anything:
-// exit 127 "node: command not found", first seen run 36134275689 — a false
-// "cannot tell" reported as silence (no red, no summary), not the real
-// gap-B signal this workflow exists to carry.
+// Card yXnplL83 — the "Measure gap B" job in prod-serving-alarm.yml shells out
+// to `node scripts/check-prod-serving.js`. When this test was written the job
+// ran on the self-hosted [self-hosted, linux, x64, gcp] pool, whose image has NO
+// node/npm, and every scheduled run failed with exit 127 "node: command not
+// found" (first seen run 36134275689) until `actions/setup-node` was added.
+// Card eLdnCPTu: the job now runs on GitHub-hosted `ubuntu-latest` (card
+// ZikVJXBp), where node is already present. The setup-node step stays, and
+// this test still pins it: it pins Node 20 on the hosted runner, and it is
+// load-bearing again if the job ever moves back to the pool.
 //
 // This test pins ONLY this one job in this one file, deliberately — the repo
 // has other self-hosted jobs that shell out to `node -e` without a setup-node
