@@ -92,6 +92,45 @@ test('sitemap: admin / api / proxy paths are refused too; /admin is noindex', ()
   assert.match(read('web/admin/index.html'), /<meta name="robots" content="noindex,nofollow"\/>/);
 });
 
+// ── card QL20pSu3: no listed URL redirects ───────────────────────────────────
+
+// Firebase Hosting serves web/<dir>/index.html and 301s `/<dir>` to `/<dir>/` before Express runs.
+// So a listed path that names such a directory without the trailing slash is a redirect form.
+function redirectForm(p) {
+  if (p === '/') return null;
+  const dir = p.replace(/^\/+|\/+$/g, '');
+  const isDirPage = fs.existsSync(path.join(ROOT, 'web', dir, 'index.html'));
+  return isDirPage && !p.endsWith('/') ? `${p} is a directory page; Hosting 301s it to ${p}/` : null;
+}
+
+test('sitemap: no listed page is a known redirect form (/campfire 301s to /campfire/)', () => {
+  assert.ok(SITEMAP_PAGES.includes('/campfire/'), 'KNOWN-POSITIVE: the campfire page is listed, with its slash');
+  for (const p of SITEMAP_PAGES) assert.strictEqual(redirectForm(p), null, `${p} is a redirect form`);
+  // KNOWN-NEGATIVE: the pre-fix entry is recognised as a redirect form by the same check.
+  assert.match(redirectForm('/campfire'), /301s it to \/campfire\//);
+  assert.strictEqual(redirectForm('/campfire/'), null);
+  assert.ok(!locs(sitemapXml()).includes(`${CANON}/campfire`), 'the redirecting URL is still in the sitemap');
+});
+
+test('campfire page carries a canonical for the listed URL', () => {
+  const html = read('web/campfire/index.html');
+  const canon = [...html.matchAll(/<link rel="canonical" href="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepStrictEqual(canon, [`${CANON}/campfire/`]);
+  assert.ok(locs(sitemapXml()).includes(canon[0]), 'the canonical is not the URL the sitemap lists');
+});
+
+test('isForbiddenPath judges the resolved path: query, double slash, encoded slash, bad escape', () => {
+  for (const bad of ['/sites?x=1', '/sites#frag', '//sites/abc', '///SITES/abc', '/sites%2Fabc', '/sites%2fabc/x',
+    '/%73ites/abc', '/api?x', '//admin', '/rp%2Fe', '/sites/%']) {
+    assert.ok(isForbiddenPath(bad), `${bad} slipped past the guard`);
+    assert.throws(() => sitemapXml({ pages: [bad] }), /never list/, `${bad} was accepted`);
+  }
+  // KNOWN-NEGATIVE: lookalikes and the real pages are not refused.
+  for (const ok of ['/', '/campfire/', '/sitesmap-guide', '/apiary', '/administer', '/a?b=1&c=<2>']) {
+    assert.ok(!isForbiddenPath(ok), `${ok} was refused`);
+  }
+});
+
 test('sitemap: every listed page has an explicit page route in server.js', () => {
   const server = read('server.js');
   for (const p of SITEMAP_PAGES) {
