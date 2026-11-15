@@ -1025,9 +1025,9 @@ app.get('/api/health', (_req, res) => res.json({
   uploadsBucket: uploads.ENABLED,
   customDomains: domains.ENABLED,
   posthog: analytics.ENABLED,
-  // Which commit this deployment serves (card mIQXYnxd): the full SHA the
-  // staging rail stamped into BUILD_COMMIT, else null (never a guess), plus the
-  // Cloud Run revision. The refinement gate reads `commit` to prove
+  // Which commit this deployment serves (cards mIQXYnxd, ApypZ3Te): the full SHA
+  // the staging or PROD rail stamped into BUILD_COMMIT, else null (never a guess),
+  // plus the Cloud Run revision. The refinement gate reads `commit` to prove
   // staging_sha == merge_sha.
   commit: buildInfo.BUILD_COMMIT,
   revision: process.env.K_REVISION || null,
