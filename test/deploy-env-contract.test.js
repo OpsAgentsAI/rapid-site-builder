@@ -244,7 +244,7 @@ test('APP-STAGING names every env key it needs, and auth cannot silently switch 
     envKeysOf(runDeploy(block), 'update-env-vars'),
     [...APP_STAGING_ENV_KEYS].sort(),
     'the APP-STAGING --update-env-vars list changed. The three that flip auth on ' +
-      '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --set-secrets) ' +
+      '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --update-secrets) ' +
       'are load-bearing: lib/auth.js computes AUTH_ENABLED from exactly those, so ' +
       'dropping one stands up an UNGATED tier whose deploy still reports success.',
   );
@@ -255,8 +255,14 @@ test('APP-STAGING takes SESSION_SECRET from Secret Manager, never as an env lite
   const cmd = runDeploy(block);
   assert.match(
     cmd,
-    /--set-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
-    'APP-STAGING must bind SESSION_SECRET via --set-secrets.',
+    /--update-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
+    'APP-STAGING must bind SESSION_SECRET via --update-secrets.',
+  );
+  assert.doesNotMatch(
+    cmd,
+    /--set-secrets/,
+    'APP-STAGING must never use --set-secrets: it REPLACES, so any secret this deploy does not ' +
+      'name would be deleted from the service (rule #20).',
   );
   assert.doesNotMatch(
     cmd,
@@ -347,17 +353,30 @@ test('APP-STAGING fails CLOSED — both smoke steps still assert auth is on', ()
   // exactly the shape this repo keeps producing.
   const block = jobBlock(read(STAGING_WF), 'deploy-app-staging');
 
-  // Anchor on the two health payloads so a renamed file cannot make this vacuous.
-  for (const f of ['/tmp/health-stg.json', '/tmp/health-stg-hosting.json']) {
-    assert.ok(block.includes(f), `the APP-STAGING job no longer writes ${f} — this guard is now vacuous`);
-    for (const flag of ['"auth":true', '"agentEngine":true']) {
-      assert.ok(
-        block.includes(`grep -q '${flag}' ${f}`),
-        `the APP-STAGING job must assert ${flag} against ${f}. One of the two smoke ` +
-          `steps is the Cloud Run URL and the other is the live host; both matter, ` +
-          `because Hosting can serve a stale rewrite target.`,
-      );
-    }
+  // Card i2xV0dn0 — RE-ANCHORED. This used to anchor on the two temp FILES
+  // (`/tmp/health-stg.json`, `/tmp/health-stg-hosting.json`) so "a renamed file cannot
+  // make this vacuous". Those files are gone: a fixed path under /tmp is owned by
+  // whichever of runner1..runner5 wrote it first, so `tee` failed for every other user
+  // and the step aborted BEFORE these very greps could run. The payload is now held in a
+  // shell variable and there is no file left to name.
+  //
+  // The anchor is now the PROBE TARGET, which is what "both matter" always meant: one
+  // step hits the Cloud Run URL and the other the live host, because Hosting can serve a
+  // stale rewrite target. A target cannot be renamed away without changing what is tested.
+  for (const target of ['"$URL/api/health"', '"$STG_APP_URL/api/health"']) {
+    assert.ok(
+      block.includes(`curl -sf --max-time 20 ${target}`),
+      `the APP-STAGING job no longer probes ${target} — this guard is now vacuous`,
+    );
+  }
+  for (const flag of ['"auth":true', '"agentEngine":true']) {
+    const asserted = block.split(`grep -q '${flag}'`).length - 1;
+    assert.ok(
+      asserted >= 2,
+      `the APP-STAGING job must assert ${flag} in BOTH smoke steps (the Cloud Run URL and ` +
+        `the live host); found ${asserted}. Hosting can serve a stale rewrite target, so ` +
+        `one assertion does not cover the other.`,
+    );
   }
 
   // And `/` must be asserted 200 against the live host — a 301 there means the

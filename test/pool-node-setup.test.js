@@ -15,12 +15,12 @@
  * is a red nobody re-reads.
  *
  * ⚠️ THE ALLOWLIST BELOW IS DEBT, NOT AN EXEMPTION, AND IT CAN ONLY SHRINK.
- * Two pool jobs still run node with no setup-node. Both live in DEPLOY
- * workflows, which this lane may not edit (Tier C — Michal presses deploy-workflow
- * changes), so they are pinned here with their evidence rather than silently
- * tolerated. (It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
+ * It is EMPTY now. It started at four: #102 (8itdTRtX) moved deploy-realapp.yml:deploy
  * and deploy.yml:ref-guard to ubuntu-latest, whose image ships node, so the
- * shrink assertion below made us delete them — the allowlist working as designed.) Three separate assertions keep the pin honest: a NEW unguarded job
+ * shrink assertion below made us delete them — the allowlist working as designed.
+ * Card XzS42jof then gave the last two pool jobs (deploy-engine.yml:deploy-engine,
+ * preview.yml:ref-guard) a setup-node step before their first node call, and
+ * deleted their entries. Three separate assertions keep the pin honest: a NEW unguarded job
  * fails, an allowlisted job that got FIXED fails (remove the entry), and an
  * allowlisted job that no longer EXISTS fails. An allowlist that cannot rot is
  * the only kind worth having.
@@ -32,7 +32,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  auditRepo, auditJob, jobsOf, loadWorkflow, nodeRunSteps, runsOnPool, key,
+  auditRepo, auditJob, jobsOf, loadWorkflow, nodeRunSteps, runsOnPool, runnerClass, key,
 } = require('../lib/poolNodeRuntime');
 
 const REPO_ROOT = path.join(__dirname, '..');
@@ -41,12 +41,7 @@ const REPO_ROOT = path.join(__dirname, '..');
  * file:job -> why it is still unguarded. Every entry must be discharged by the
  * Tier-C card that owns the deploy workflows; none may be added without one.
  */
-const KNOWN_UNGUARDED = {
-  'deploy-engine.yml:deploy-engine':
-    'deploy workflow (Tier C). Dispatch-only, and its ref-guard step carries no `if:` — so the node call runs on EVERY dispatch.',
-  'preview.yml:ref-guard':
-    'deploy workflow (Tier C). Dispatch-only; its ref-guard step shells out to node with no setup-node before it.',
-};
+const KNOWN_UNGUARDED = {};
 
 /** Write a throwaway repo skeleton holding exactly these workflow files. */
 const fixtureRepo = (files) => {
@@ -103,6 +98,15 @@ test("this card's own fix is pinned by name, not merely by the aggregate", () =>
   const row = auditRepo(REPO_ROOT).find((r) => key(r) === 'prod-serving-alarm.yml:check');
   assert.ok(row, 'prod-serving-alarm.yml:check vanished from the census');
   assert.strictEqual(row.setupNodeBeforeFirstUse, true, 'the gap-B alarm lost its setup-node step');
+});
+
+test('card XzS42jof: the last two pool ref guards set node up before their first node call, pinned by name', () => {
+  const rows = auditRepo(REPO_ROOT);
+  for (const k of ['deploy-engine.yml:deploy-engine', 'preview.yml:ref-guard']) {
+    const row = rows.find((r) => key(r) === k);
+    assert.ok(row, `${k} vanished from the census`);
+    assert.strictEqual(row.setupNodeBeforeFirstUse, true, `${k} runs node on the pool with no setup-node before it`);
+  }
 });
 
 // ── The matcher, on synthetic fixtures with controls ────────────────────────
@@ -236,4 +240,117 @@ test('a setup-node mention INSIDE a run body is not a setup-node step', () => {
   const [row] = auditRepo(root);
   assert.strictEqual(row.setupNodeCount, 0, 'text inside a run body was counted as a setup-node step');
   assert.strictEqual(row.guarded, false, 'a job whose only setup-node is an echo was scored guarded');
+});
+
+// ── Card QRm63h1O: shapes the matcher used to miss, and runners it scored hosted ──
+//
+// Each shape below is a pool job that runs node with NO setup-node, which the
+// audit used to score as "runs no node" (no row at all) — i.e. green. Every
+// known-positive has a known-negative control: the same text with node NOT in
+// command position, which must still produce no row. And every positive is run
+// a second time with setup-node in front, which must score guarded, so a shape
+// is never "fixed" by a matcher that just fires on everything.
+
+const SETUP = '      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n';
+const scalarStep = (value) => `      - name: s\n        run: ${value}`;
+const blockStep = (header, cmd) => `      - name: s\n        run: ${header}\n          ${cmd}`;
+
+const MISSED_SHAPES = {
+  // a quoted scalar
+  'dquote.yml': { steps: scalarStep('"node scripts/x.js"'), control: scalarStep('"echo node scripts/x.js"') },
+  'squote.yml': { steps: scalarStep("'node scripts/x.js'"), control: scalarStep("'echo \"node scripts/x.js\"'") },
+  'dquote-folded.yml': {
+    steps: '      - name: s\n        run: "git fetch origin &&\n          node scripts/x.js"',
+    control: '      - name: s\n        run: "git fetch origin &&\n          echo node scripts/x.js"',
+  },
+  'dquote-escape.yml': { steps: scalarStep('"git fetch\\nnode scripts/x.js"'), control: scalarStep('"git fetch\\necho node scripts/x.js"') },
+  // a brace group
+  'brace.yml': { steps: blockStep('|', '{ node scripts/x.js; } > out.log'), control: blockStep('|', '{ echo node scripts/x.js; } > out.log; echo ${node:-none}') },
+  // timeout DURATION
+  'timeout.yml': { steps: blockStep('|', 'timeout 60 node scripts/x.js'), control: blockStep('|', 'echo "timeout 60 node"; timeout 60 sleep 1') },
+  'timeout-opts.yml': { steps: blockStep('|', 'timeout -s KILL --preserve-status 5m npm ci'), control: blockStep('|', 'timeout -s KILL 5m make build') },
+  // the package managers
+  'yarn.yml': { steps: blockStep('|', 'yarn install --frozen-lockfile'), control: blockStep('|', 'echo "use yarn"; rm -f yarn.lock') },
+  'pnpm.yml': { steps: blockStep('|', 'git fetch && pnpm install'), control: blockStep('|', 'rm -f pnpm-lock.yaml; echo pnpm') },
+  // a shebang script run by path
+  'shebang.yml': { steps: blockStep('|', './scripts/x.js --check'), control: blockStep('|', 'chmod +x ./scripts/x.js && echo ./scripts/x.js') },
+  'shebang-mjs.yml': { steps: blockStep('|', 'set -e; scripts/check.mjs'), control: blockStep('|', 'cat scripts/check.mjs') },
+  // shell: node {0}
+  'shell-node.yml': {
+    steps: '      - name: s\n        shell: node {0}\n        run: console.log(process.version)',
+    control: '      - name: s\n        shell: bash\n        run: |\n          echo "shell: node {0}"',
+  },
+  // a block-scalar indentation indicator (and a header comment)
+  'block-indent.yml': { steps: blockStep('|2', 'node scripts/x.js'), control: blockStep('|2', 'echo node scripts/x.js') },
+  'block-chomp-indent.yml': { steps: blockStep('>-2', 'node scripts/x.js'), control: blockStep('>-2', 'echo node') },
+  'block-comment.yml': { steps: blockStep('|  # measure', 'node scripts/x.js'), control: blockStep('|  # measure', 'echo node') },
+};
+
+test('QRm63h1O: every formerly-missed node shape is reported UNGUARDED on the pool, with a control', () => {
+  for (const [file, { steps, control }] of Object.entries(MISSED_SHAPES)) {
+    const rows = auditRepo(fixtureRepo({ [file]: poolJob(steps) }));
+    assert.strictEqual(rows.length, 1, `${file}: the node call was not seen at all (rows: ${JSON.stringify(rows)})`);
+    assert.strictEqual(rows[0].pool, true, `${file}: fixture is not a pool job`);
+    assert.strictEqual(rows[0].guarded, false, `${file}: a pool job with no setup-node was scored guarded`);
+    // GUARDED CONTROL: the same step behind setup-node is compliant.
+    const fixed = auditRepo(fixtureRepo({ [file]: poolJob(SETUP + steps) }));
+    assert.strictEqual(fixed.length, 1, `${file}: the guarded variant lost its row`);
+    assert.strictEqual(fixed[0].guarded, true, `${file}: setup-node BEFORE the call was not accepted`);
+    // NEGATIVE CONTROL: node not in command position is no call.
+    assert.deepStrictEqual(auditRepo(fixtureRepo({ [file]: poolJob(control) })), [],
+      `${file}: control ${JSON.stringify(control)} was read as a node invocation`);
+  }
+});
+
+test('QRm63h1O: a `shell: node` DEFAULT (job or workflow level) makes every run step a node call', () => {
+  const jobDefaults = (shell, steps) => 'name: f\non:\n  workflow_dispatch:\njobs:\n  j:\n    runs-on: [self-hosted, linux, x64, gcp]\n' +
+    `    defaults:\n      run:\n        shell: ${shell}\n    steps:\n${steps}\n`;
+  const wfDefaults = (shell, steps) => `name: f\non:\n  workflow_dispatch:\ndefaults:\n  run:\n    shell: ${shell}\njobs:\n  j:\n` +
+    `    runs-on: [self-hosted, linux, x64, gcp]\n    steps:\n${steps}\n`;
+  const js = scalarStep('console.log(1)');
+  for (const [name, make] of Object.entries({ job: jobDefaults, workflow: wfDefaults })) {
+    const rows = auditRepo(fixtureRepo({ 'a.yml': make('node {0}', js) }));
+    assert.strictEqual(rows.length, 1, `${name} defaults: the node shell was not seen`);
+    assert.strictEqual(rows[0].guarded, false, `${name} defaults: a node-shell pool job with no setup-node was scored guarded`);
+    assert.strictEqual(auditRepo(fixtureRepo({ 'a.yml': make('node {0}', SETUP + js) }))[0].guarded, true,
+      `${name} defaults: setup-node before the first run step was not accepted`);
+    // CONTROL: a bash default is not node, and the `defaults: run:` mapping is not itself a step.
+    assert.deepStrictEqual(auditRepo(fixtureRepo({ 'a.yml': make('bash', blockStep('|', 'echo node')) })), [],
+      `${name} defaults: a bash default (or the defaults mapping) was read as a node invocation`);
+  }
+});
+
+test('QRm63h1O: runnerClass — an expression is unknown, a group-only runner is a group, both FAIL CLOSED to pool', () => {
+  const job = (runsOn, steps = '      - run: x\n') => ({ name: 'j', text: `  j:\n    runs-on:${runsOn}\n    steps:\n${steps}` });
+  const cases = [
+    [' ${{ inputs.runner }}', 'unknown', true],
+    [" '${{ matrix.os }}'", 'unknown', true],
+    [' [self-hosted, "${{ inputs.size }}"]', 'pool', true],
+    ['\n      group: pool', 'group', true],
+    [' { group: pool }', 'group', true],
+    ['\n      group: pool\n      labels: [self-hosted, gcp]', 'pool', true],
+    ['\n      group: ${{ inputs.group }}', 'unknown', true],
+    // CONTROLS: readable hosted runners stay hosted.
+    [' ubuntu-latest', 'hosted', false],
+    [' [ubuntu-latest]', 'hosted', false],
+    [' ubuntu-latest  # was ${{ inputs.runner }}, group: pool', 'hosted', false],
+  ];
+  for (const [runsOn, cls, pool] of cases) {
+    assert.strictEqual(runnerClass(job(runsOn)), cls, `runs-on:${runsOn} → expected ${cls}`);
+    assert.strictEqual(runsOnPool(job(runsOn)), pool, `runs-on:${runsOn} → expected pool=${pool}`);
+  }
+  // CONTROL: an expression or a group: in a STEP never re-classes a hosted job.
+  const steps = '      - run: echo "${{ inputs.runner }}"\n      - with:\n          group: pool\n';
+  assert.strictEqual(runnerClass(job(' ubuntu-latest', steps)), 'hosted', 'a step body re-classed a hosted job');
+  assert.strictEqual(runnerClass({ name: 'j', text: '  j:\n    uses: ./.github/workflows/x.yml\n' }), 'hosted', 'a job with no runs-on');
+});
+
+test('QRm63h1O: a pool job behind an expression or a group-only runner is audited, not silently hosted', () => {
+  for (const runsOn of ['${{ inputs.runner }}', '\n      group: pool']) {
+    const yml = `name: f\non:\n  workflow_dispatch:\njobs:\n  j:\n    runs-on: ${runsOn}\n    steps:\n      - name: s\n        run: node scripts/x.js\n`;
+    const rows = auditRepo(fixtureRepo({ 'a.yml': yml }));
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].pool, true, `runs-on: ${runsOn} was scored hosted`);
+    assert.strictEqual(rows[0].guarded, false, `runs-on: ${runsOn} with no setup-node was scored guarded`);
+  }
 });
