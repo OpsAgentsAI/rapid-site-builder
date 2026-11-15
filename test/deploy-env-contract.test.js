@@ -244,7 +244,7 @@ test('APP-STAGING names every env key it needs, and auth cannot silently switch 
     envKeysOf(runDeploy(block), 'update-env-vars'),
     [...APP_STAGING_ENV_KEYS].sort(),
     'the APP-STAGING --update-env-vars list changed. The three that flip auth on ' +
-      '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --set-secrets) ' +
+      '(FIREBASE_PROJECT_ID, FIREBASE_API_KEY, plus SESSION_SECRET via --update-secrets) ' +
       'are load-bearing: lib/auth.js computes AUTH_ENABLED from exactly those, so ' +
       'dropping one stands up an UNGATED tier whose deploy still reports success.',
   );
@@ -255,8 +255,14 @@ test('APP-STAGING takes SESSION_SECRET from Secret Manager, never as an env lite
   const cmd = runDeploy(block);
   assert.match(
     cmd,
-    /--set-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
-    'APP-STAGING must bind SESSION_SECRET via --set-secrets.',
+    /--update-secrets\s+"SESSION_SECRET=rapid-builder-session-secret:latest"/,
+    'APP-STAGING must bind SESSION_SECRET via --update-secrets.',
+  );
+  assert.doesNotMatch(
+    cmd,
+    /--set-secrets/,
+    'APP-STAGING must never use --set-secrets: it REPLACES, so any secret this deploy does not ' +
+      'name would be deleted from the service (rule #20).',
   );
   assert.doesNotMatch(
     cmd,
