@@ -28,6 +28,17 @@ name: Deploy Real App (auth-ON, separate surface)
 # STAGING is deploy.yml -> rapid-builder-proxy + rapid-site-builder, on push:main.
 # 🚨 The names read backwards — `rapid-site-builder` is STAGING. Say the TIER.
 
+# ── WHICH COMMIT PROD SERVES (card ApypZ3Te) ────────────────────────────────
+# /api/health reports `commit` from a BUILD_COMMIT file (lib/buildInfo.js, card
+# mIQXYnxd). This job writes that file after the ref guard and before the build,
+# the same way deploy-realapp-staging.yml does, then refuses to upload if gcloud's
+# own dry run does not list it, and both smoke steps demand the SHA back.
+# test/realapp-prod-build-commit.test.js executes these steps.
+#
+# ⚠️ THIS COPY IS THE ONE THAT MATTERS. workflow_dispatch runs the file from the
+# dispatched ref, and main's copy refuses every dispatch at its ref guard, so
+# only real-app's copy ever reaches a deploy. main needs no matching change.
+
 on:
   workflow_dispatch:
 
@@ -154,12 +165,34 @@ jobs:
             if (!v.allow) { console.log("::error::" + v.message); process.exit(1); }
           '
 
+      # Written AFTER the guard, BEFORE the build: lib/buildInfo.js reads it and
+      # /api/health reports it as `commit`. Never committed to the repo.
+      - name: Stamp the commit this build serves
+        id: stamp
+        run: |
+          git rev-parse HEAD > BUILD_COMMIT
+          echo "sha=$(cat BUILD_COMMIT)" >> "$GITHUB_OUTPUT"
+          echo "prod commit: $(cat BUILD_COMMIT)"
+
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
+
+      # gcloud's own dry run of what `--source .` would upload, under the rules
+      # in the workspace. Runs before the first upload; a stamp the upload would
+      # drop must stop the job while PROD is still untouched.
+      - name: Refuse an upload without BUILD_COMMIT
+        run: |
+          set -euo pipefail
+          gcloud meta list-files-for-upload . > "$RUNNER_TEMP/upload-set.txt"
+          if ! grep -qxE '(\./)?BUILD_COMMIT' "$RUNNER_TEMP/upload-set.txt"; then
+            echo "::error::BUILD_COMMIT is not in the upload set; /api/health could not report the deployed commit. Nothing was uploaded."
+            exit 1
+          fi
+          echo "upload set: $(wc -l < "$RUNNER_TEMP/upload-set.txt") files, BUILD_COMMIT present"
 
       - name: Deploy Cloud Run (auth ON)
         run: |
@@ -218,6 +251,8 @@ jobs:
             --project "$PROJECT_ID" --region "$REGION" --quiet
 
       - name: Smoke test Cloud Run (expect auth ON)
+        env:
+          SHA: ${{ steps.stamp.outputs.sha }}
         run: |
           URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
           echo "Service URL: $URL"
@@ -231,6 +266,9 @@ jobs:
           # deploy says nothing about the feature). FIREBASE_HOSTING_SITE is wired
           # above; an empty value renders customDomains:false with no error.
           grep -q '"customDomains":true' /tmp/health.json
+          # The revision answering is the one this run built (card ApypZ3Te).
+          grep -q "\"commit\":\"$SHA\"" /tmp/health.json \
+            || { echo "::error::Cloud Run did not report commit $SHA"; exit 1; }
 
       - name: Deploy Firebase Hosting (separate site, via Cloud Build native ADC)
         run: |
@@ -248,10 +286,15 @@ jobs:
             --service-account="projects/$PROJECT_ID/serviceAccounts/gha-deployer@opsagent-staging.iam.gserviceaccount.com"
 
       - name: Smoke test Hosting
+        env:
+          SHA: ${{ steps.stamp.outputs.sha }}
         run: |
           sleep 5
-          curl -sf -o /dev/null -w "custom domain: %{http_code}\n" "$APP_URL/api/health"
+          curl -sf -o "$RUNNER_TEMP/health-custom-domain.json" -w "custom domain: %{http_code}\n" "$APP_URL/api/health"
           curl -sf -o /dev/null -w "hosting: %{http_code}\n" "$HOSTING_URL/api/health"
+          # The URL users are given serves the commit this run built (card ApypZ3Te).
+          grep -q "\"commit\":\"$SHA\"" "$RUNNER_TEMP/health-custom-domain.json" \
+            || { echo "::error::$APP_URL did not report commit $SHA"; exit 1; }
 
       # ── PROVENANCE (cards 22I0yUum / eKfog19I) ─────────────────────────────
       # The PROD surface's URL is stable, so after the fact nothing in the run
