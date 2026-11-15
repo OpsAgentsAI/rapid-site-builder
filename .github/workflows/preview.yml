@@ -203,6 +203,14 @@ jobs:
         with:
           ref: ${{ needs.verify-pr.outputs.head_sha }}
 
+      # 🔒 Card OmZcY0q6: refuse a tree that holds ANY symlink, before credentials
+      # exist, before the sed -i bake on web/ and before the source upload.
+      # gcloud's source zip FOLLOWS file symlinks, and list-files-for-upload shows
+      # such a file under its innocent name. test/refuse-symlinks.test.js pins
+      # this step's place in every job that uploads source.
+      - name: Refuse a source tree that contains a symlink
+        run: bash scripts/refuse-symlinks.sh
+
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
