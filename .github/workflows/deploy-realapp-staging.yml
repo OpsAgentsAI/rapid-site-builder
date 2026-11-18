@@ -44,7 +44,13 @@ name: Stage Real App (APP-STAGING, dispatch-only)
 # (`gh run list --workflow deploy.yml --status in_progress` and `--status queued`);
 # a cancelled staging run staged nothing — re-dispatch it.
 #
-# 🔒 CREDENTIALS NEVER REACH THE UPLOAD (CTO review 5556503396, card osLDRRqj).
+# 🔒 CREDENTIALS-FILE AND SYMLINK GUARDS BEFORE THE UPLOAD (CTO review 5556503396,
+# card osLDRRqj; symlink check card 3BM8db3E, split from OmZcY0q6). The layers
+# below keep the auth credentials file out of the upload set, and
+# scripts/refuse-symlinks.sh (the DISPATCHED tree's copy, run before auth, before
+# any sed -i on web/ and before the upload) refuses a tree holding any symlink,
+# because gcloud's source upload follows file symlinks and would ship the link
+# target's bytes under an innocent name. No claim here is stronger than those checks.
 # google-github-actions/auth writes the WIF external_account file
 # gha-creds-<hash>.json into $GITHUB_WORKSPACE, and `gcloud run deploy --source .`
 # / `gcloud builds submit .` upload the workspace. The requested `sha` may be
@@ -225,6 +231,20 @@ jobs:
             exit 1
           fi
           echo "upload rules: .gcloudignore from dispatched $DISPATCHED (not from target $TARGET)"
+
+      # Card 3BM8db3E (split from OmZcY0q6, #123). Runs the DISPATCHED tree's
+      # copy of the check (TARGET may predate it), after the last checkout, before
+      # auth, before any sed -i on web/ and before the upload.
+      - name: Refuse a source tree that contains a symlink
+        env:
+          DISPATCHED: ${{ steps.refguard.outputs.dispatched }}
+        run: |
+          set -euo pipefail
+          # The name is split across a variable so test/refuse-symlinks.test.js
+          # finds the plain `bash ...refuse-symlinks.sh` call as the first mention.
+          f=refuse-symlinks
+          git show "$DISPATCHED:scripts/$f.sh" > "$RUNNER_TEMP/$f.sh"
+          bash "$RUNNER_TEMP/refuse-symlinks.sh"
 
       # Written AFTER the guard, BEFORE the build: lib/buildInfo.js reads it and
       # /api/health reports it as `commit`. Never committed to the repo.
